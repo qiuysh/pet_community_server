@@ -1,83 +1,86 @@
-# 🐾 宠物社区 Web 应用
+# 宠物社区 · 后端
 
-一个面向宠物爱好者的社区平台，提供宠物档案管理、社区互动、社交交流等功能。
+社区 RESTful API 服务（独立仓库 / 分支）。
 
-## 🛠️ 技术栈
+## 技术栈
 
 - **语言**: Go 1.22+
-- **框架**: Gin Web Framework
+- **框架**: Gin
 - **ORM**: GORM v2
 - **数据库**: MySQL 8.0+
-- **缓存**: Redis 7.0+
+- **缓存**: Redis 7.0+（可选，失败可降级）
 - **认证**: JWT
 
-## 📁 项目结构
-
-```bash
-
-pet_community/
-├── server/                # 后端代码
-│   ├── cmd/               # 命令入口
-│   ├── controller/        # HTTP 控制器
-│   ├── service/           # 业务逻辑
-│   ├── repository/        # 数据访问层
-│   ├── model/             # 数据库模型
-│   ├── types/             # 类型定义
-│   ├── middleware/        # 中间件
-│   ├── util/              # 工具函数
-│   ├── config/            # 配置文件
-│   └── sql/               # 数据库脚本（init 初始化 / incremental 增量）
+## 目录结构
 
 ```
-
-## 🚀 快速开始
-
-### 环境要求
-
-- Go >= 1.22.0
-- MySQL >= 8.0.0
-- Redis >= 7.0.0
-
-
-### 后端启动
-
-```bash
-cd server
-go mod download
-go run cmd/main.go
+├── cmd/           # 入口
+├── config/        # 配置加载、DB / Redis 初始化
+├── controller/    # HTTP 控制器
+├── service/       # 业务逻辑
+├── repository/    # 数据访问
+├── model/         # 表模型
+├── types/         # 请求/响应 DTO
+├── middleware/    # 中间件
+├── utils/         # 工具
+├── sql/           # 数据库脚本（init / incremental）
+├── config.yaml    # 唯一应用配置
+└── go.mod
 ```
 
-### 数据库初始化
+## 环境要求
+
+- Go >= 1.22
+- MySQL >= 8.0
+- Redis >= 7.0（可选）
+
+## 数据库初始化
 
 ```bash
-# 全新空库：结构 + 系统基础数据
+# 必选：建库建表 + 系统基础数据
 mysql -u root -p < sql/init/create.sql
 
-# 可选：开发/E2E 测试种子
+# 可选：开发 / E2E 测试种子
 mysql -u root -p pet_community < sql/incremental/20260724100000_seed_dev_data.sql
 ```
 
 说明见 [sql/README.md](./sql/README.md)。
 
-## 🔧 配置说明
+- 后台默认账号：`admin` / `admin123`（及脚本内其它角色账号）
+- 前台测试账号密码见种子脚本注释（`user123456`）
 
+## 快速开始
 
-### 后端配置
+```bash
+# 按需修改 config.yaml（数据库、Redis、端口等）
+go mod download
+go run cmd/main.go
+```
 
-后端唯一配置文件为 `server/config.yaml`（不分环境，不再读取 `.env`）。
+默认监听：`http://0.0.0.0:8083`（见 `config.yaml` → `server.port`）。
 
-## 🔐 API 认证
+## 配置说明
 
-API 使用 JWT Token 认证，请求时在 Header 中携带：
+唯一配置文件：`config.yaml`（不读 `.env`）。主要项：
+
+| 区块 | 说明 |
+|------|------|
+| `server` | 监听地址、端口、超时 |
+| `database` | MySQL 连接 |
+| `jwt` | JWT 密钥（长度 ≥ 16） |
+| `redis` | 是否启用及连接池 |
+| `rate_limit` | 限流 |
+| `scheduler` | 定时任务 cron |
+
+## API 认证
+
+在请求头携带：
 
 ```
 Authorization: Bearer <token>
 ```
 
-## 📖 文档
+## 协作约定
 
-- **需求文档**: `docs/requirements/pet-community-requirements.md`
-- **前端规范**: `docs/frontend/`
-- **后端规范**: `docs/backend/`
-- **API 文档**: `docs/backend/api-spec.md`
-- **数据库设计**: `docs/backend/database-design.md`
+- 后端规范与 API / 库表设计见关联文档中的 `docs/backend/`、`docs/specs/`
+- Agent 协作规范见 `AGENTS.md`（若本分支包含）
