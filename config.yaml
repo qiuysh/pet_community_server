@@ -1,0 +1,38 @@
+# 应用配置
+# 路径：server/config.yaml
+server:
+  host: "0.0.0.0"
+  port: 8083
+  timeout: 30
+
+database:
+  host: localhost
+  port: 3306
+  username: root
+  password: xxxx
+  database: pet_community
+
+jwt:
+  secret: sdiak0i5u2y34yr845093u3u1237r545454503i4023i4
+
+redis:
+  enabled: true
+  host: 127.0.0.1
+  port: 6379
+  password: xxxx
+  db: 0
+  pool_size: 10
+
+rate_limit:
+  enabled: true
+  per_ip_per_route: 100
+  per_ip_global: 500
+  per_user_per_route: 100
+  window_seconds: 60
+
+scheduler:
+  # cron 含秒字段：秒 分 时 日 月 周
+  stats_cron: "0 0 2 * * *"
+  notification_cron: "0 * * * * *"
+  scheduled_post_cron: "0 */5 * * * *"
+  stats_startup_delay_sec: 5
