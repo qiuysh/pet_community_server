@@ -21,7 +21,8 @@ type CreateNotificationRequest struct {
 	Title      string  `json:"title" binding:"required"`
 	Content    string  `json:"content" binding:"required"`
 	Type       int     `json:"type" binding:"required,oneof=1 2 3"`
-	TargetType int     `json:"targetType" binding:"required,oneof=0 1 2"`
+	// TargetType 用指针：0=全部用户 是合法值，int+required 会把 0 当成未传
+	TargetType *int    `json:"targetType" binding:"required,oneof=0 1 2"`
 	TargetIDs  []uint  `json:"targetIds,omitempty"`
 	PublishAt  *string `json:"publishAt,omitempty"`
 }
@@ -30,7 +31,8 @@ type UpdateNotificationRequest struct {
 	Title      string  `json:"title"`
 	Content    string  `json:"content"`
 	Type       int     `json:"type,omitempty" binding:"omitempty,oneof=1 2 3"`
-	TargetType int     `json:"targetType,omitempty" binding:"omitempty,oneof=0 1 2"`
+	// 同 Create：允许显式传 0（全部用户）
+	TargetType *int    `json:"targetType" binding:"omitempty,oneof=0 1 2"`
 	TargetIDs  []uint  `json:"targetIds,omitempty"`
 	PublishAt  *string `json:"publishAt,omitempty"`
 }
@@ -46,7 +48,7 @@ func (c *AdminNotificationController) CreateNotification(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	notification, err := c.adminService.CreateNotification(req.Title, req.Content, req.Type, req.TargetType, req.TargetIDs, publishAt, actor.AdminID, actor.IP)
+	notification, err := c.adminService.CreateNotification(req.Title, req.Content, req.Type, *req.TargetType, req.TargetIDs, publishAt, actor.AdminID, actor.IP)
 	if err != nil {
 		ctx.JSON(200, types.ErrorResponse(types.CodeSystemError, err.Error()))
 		return
@@ -69,7 +71,11 @@ func (c *AdminNotificationController) UpdateNotification(ctx *gin.Context) {
 	if !ok2 {
 		return
 	}
-	notification, err := c.adminService.UpdateNotification(id, req.Title, req.Content, req.Type, req.TargetType, req.TargetIDs, publishAt, actor.AdminID, actor.IP)
+	targetType := 0
+	if req.TargetType != nil {
+		targetType = *req.TargetType
+	}
+	notification, err := c.adminService.UpdateNotification(id, req.Title, req.Content, req.Type, targetType, req.TargetIDs, publishAt, actor.AdminID, actor.IP)
 	if err != nil {
 		ctx.JSON(200, types.ErrorResponse(types.CodeSystemError, err.Error()))
 		return
