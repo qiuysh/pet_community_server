@@ -43,16 +43,24 @@ func (s *AdService) ListPositions(page, pageSize int) ([]model.AdPosition, int64
 	return s.adRepo.ListPositions(page, pageSize)
 }
 
-func (s *AdService) UpdatePosition(id uint, name, location, size string, status int) (*model.AdPosition, error) {
+func (s *AdService) UpdatePosition(id uint, name, location, size string, status *int) (*model.AdPosition, error) {
 	position, err := s.adRepo.GetPositionByID(id)
 	if err != nil {
 		return nil, errors.New("广告位不存在")
 	}
 
-	position.Name = name
-	position.Location = location
-	position.Size = size
-	position.Status = status
+	if name != "" {
+		position.Name = name
+	}
+	if location != "" {
+		position.Location = location
+	}
+	if size != "" {
+		position.Size = size
+	}
+	if status != nil {
+		position.Status = *status
+	}
 
 	err = s.adRepo.UpdatePosition(position)
 	if err == nil {

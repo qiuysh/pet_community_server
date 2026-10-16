@@ -62,7 +62,8 @@ type UpdateAdPositionRequest struct {
 	Name     string `json:"name" binding:"omitempty,max=50"`
 	Location string `json:"location" binding:"omitempty,oneof=home_banner splash detail_sidebar topic_banner"`
 	Size     string `json:"size" binding:"omitempty,max=20"`
-	Status   int    `json:"status" binding:"omitempty,oneof=0 1"`
+	// 指针：未传时不覆盖，避免前端省略 status 时被写成 0（禁用）
+	Status *int `json:"status" binding:"omitempty,oneof=0 1"`
 }
 
 func (c *AdminAdController) CreateAdPosition(ctx *gin.Context) {

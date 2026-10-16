@@ -62,7 +62,8 @@ func TestAdServiceUpdatePosition(t *testing.T) {
 	position := createTestAdPosition(db)
 
 	t.Run("success", func(t *testing.T) {
-		updated, err := srv.UpdatePosition(position.ID, "Updated", "home", "800x400", 1)
+		status := 1
+		updated, err := srv.UpdatePosition(position.ID, "Updated", "home", "800x400", &status)
 		if err != nil {
 			t.Fatalf("update position failed: %v", err)
 		}
@@ -71,8 +72,18 @@ func TestAdServiceUpdatePosition(t *testing.T) {
 		}
 	})
 
+	t.Run("omit status keeps previous", func(t *testing.T) {
+		updated, err := srv.UpdatePosition(position.ID, "KeepStatus", "home_banner", "750x300", nil)
+		if err != nil {
+			t.Fatalf("update position failed: %v", err)
+		}
+		if updated.Status != 1 {
+			t.Errorf("expected status 1 preserved, got %d", updated.Status)
+		}
+	})
+
 	t.Run("not found", func(t *testing.T) {
-		_, err := srv.UpdatePosition(9999, "Ghost", "home", "800x400", 1)
+		_, err := srv.UpdatePosition(9999, "Ghost", "home", "800x400", nil)
 		if err == nil {
 			t.Error("expected error for non-existent position")
 		}
