@@ -1,11 +1,17 @@
 package service
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
+	"io"
+	mathrand "math/rand"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"pet-community/cache"
@@ -13,6 +19,7 @@ import (
 	"pet-community/model"
 	"pet-community/repository"
 	"pet-community/types"
+	"pet-community/utils"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -243,6 +250,48 @@ func (s *UserService) UpdateProfile(userID uint, req *types.UserProfileUpdateReq
 	}
 
 	return convertToUserInfo(user), nil
+}
+
+// UploadAvatar 上传用户头像并写入资料（≤2MB）
+func (s *UserService) UploadAvatar(userID uint, file io.Reader, originalExt string) (*types.UserInfo, error) {
+	ext := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(originalExt, ".")))
+	switch ext {
+	case "jpg", "jpeg", "png", "webp":
+	default:
+		return nil, errors.New("仅支持 jpg/jpeg/png/webp 格式的头像")
+	}
+
+	uploadDir := filepath.Join("public", "uploads", "avatar")
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		return nil, fmt.Errorf("创建上传目录失败: %w", err)
+	}
+
+	randBytes := make([]byte, 16)
+	if _, err := rand.Read(randBytes); err != nil {
+		return nil, fmt.Errorf("生成随机文件名失败: %w", err)
+	}
+	fileName := fmt.Sprintf("%d_%s.%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes), ext)
+	fullPath := filepath.Join(uploadDir, fileName)
+
+	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("保存文件失败: %w", err)
+	}
+	defer f.Close()
+
+	maxSize := utils.MaxAvatarBytes
+	written, err := io.Copy(f, io.LimitReader(file, maxSize+1))
+	if err != nil {
+		_ = os.Remove(fullPath)
+		return nil, fmt.Errorf("保存图片数据失败: %w", err)
+	}
+	if written > maxSize {
+		_ = os.Remove(fullPath)
+		return nil, errors.New("头像大小不得超过 2MB")
+	}
+
+	urlPath := "/uploads/avatar/" + fileName
+	return s.UpdateProfile(userID, &types.UserProfileUpdateRequest{Avatar: urlPath})
 }
 
 func (s *UserService) ChangePassword(userID uint, req *types.PasswordChangeRequest) error {
@@ -525,6 +574,68 @@ func (s *UserService) ThirdPartyLogin(req *types.ThirdPartyLoginRequest, ip, use
 		User:         *convertToUserInfo(user),
 		IsNewUser:    true,
 	}, nil
+}
+
+// ListThirdPartyAccounts 列出当前用户已绑定的第三方账号
+func (s *UserService) ListThirdPartyAccounts(userID uint) ([]types.ThirdPartyAccountInfo, error) {
+	accounts, err := s.userRepo.GetUserThirdAccounts(userID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]types.ThirdPartyAccountInfo, 0, len(accounts))
+	for _, a := range accounts {
+		result = append(result, types.ThirdPartyAccountInfo{
+			Platform:  a.Platform,
+			Nickname:  a.Nickname,
+			Avatar:    a.Avatar,
+			CreatedAt: a.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	return result, nil
+}
+
+// BindThirdPartyAccount 已登录用户绑定第三方（演示：用 code 生成 openID）
+func (s *UserService) BindThirdPartyAccount(userID uint, req *types.BindThirdPartyAccountRequest) error {
+	user, err := s.userRepo.GetByID(userID)
+	if err != nil {
+		return errors.New("用户不存在")
+	}
+
+	existing, err := s.userRepo.GetUserThirdAccounts(userID)
+	if err != nil {
+		return err
+	}
+	for _, a := range existing {
+		if a.Platform == req.Platform {
+			return errors.New("该平台已绑定")
+		}
+	}
+
+	openID := fmt.Sprintf("%s_%s", req.Platform, req.Code)
+	if other, err := s.userRepo.GetThirdAccount(req.Platform, openID); err == nil && other != nil {
+		if other.UserID != userID {
+			return errors.New("该第三方账号已绑定其他用户")
+		}
+		return nil
+	}
+
+	return s.userRepo.CreateThirdAccount(&model.UserThirdAccount{
+		UserID:   userID,
+		Platform: req.Platform,
+		OpenID:   openID,
+		Nickname: user.Nickname,
+		Avatar:   user.Avatar,
+	})
+}
+
+// UnbindThirdPartyAccount 解绑第三方账号
+func (s *UserService) UnbindThirdPartyAccount(userID uint, platform string) error {
+	switch platform {
+	case "wechat", "weibo", "qq":
+	default:
+		return errors.New("不支持的平台")
+	}
+	return s.userRepo.UnbindThirdAccount(userID, platform)
 }
 
 // RefreshToken 刷新Token
@@ -950,17 +1061,17 @@ func convertToUserInfo(user *model.User) *types.UserInfo {
 }
 
 func generateCode() string {
-	rand.Seed(time.Now().UnixNano())
+	mathrand.Seed(time.Now().UnixNano())
 	code := ""
 	for i := 0; i < 6; i++ {
-		code += fmt.Sprintf("%d", rand.Intn(10))
+		code += fmt.Sprintf("%d", mathrand.Intn(10))
 	}
 	return code
 }
 
 func generateNickname() string {
-	rand.Seed(time.Now().UnixNano())
-	return fmt.Sprintf("宠友%06d", rand.Intn(1000000))
+	mathrand.Seed(time.Now().UnixNano())
+	return fmt.Sprintf("宠友%06d", mathrand.Intn(1000000))
 }
 
 func generateDeviceID(userAgent, ip string) string {

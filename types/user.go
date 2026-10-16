@@ -189,6 +189,19 @@ type ThirdPartyBindRequest struct {
 	Code     string `json:"code" binding:"required,len=6"`
 }
 
+// BindThirdPartyAccountRequest 已登录用户绑定第三方账号（演示模式用 code）
+type BindThirdPartyAccountRequest struct {
+	Platform string `json:"platform" binding:"required,oneof=wechat weibo qq"`
+	Code     string `json:"code" binding:"required"`
+}
+
+type ThirdPartyAccountInfo struct {
+	Platform  string `json:"platform"`
+	Nickname  string `json:"nickname"`
+	Avatar    string `json:"avatar"`
+	CreatedAt string `json:"createdAt"`
+}
+
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refreshToken" binding:"required"`
 }

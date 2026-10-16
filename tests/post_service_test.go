@@ -266,8 +266,8 @@ func TestPostServiceListPosts(t *testing.T) {
 	db.Create(&model.Post{UserID: 1, Content: "private post", Status: 1, Visibility: 2})
 	db.Create(&model.Post{UserID: 2, Content: "another public", Status: 1, Visibility: 0})
 
-	t.Run("list public", func(t *testing.T) {
-		resp, err := srv.ListPosts(0, 0, 0, "", "", 1, 10)
+	t.Run("list public feed", func(t *testing.T) {
+		resp, err := srv.ListPosts(0, 0, 0, 0, "", "", 1, 10)
 		if err != nil {
 			t.Fatalf("list posts failed: %v", err)
 		}
@@ -276,13 +276,23 @@ func TestPostServiceListPosts(t *testing.T) {
 		}
 	})
 
-	t.Run("list own posts", func(t *testing.T) {
-		resp, err := srv.ListPosts(1, 0, 0, "", "", 1, 10)
+	t.Run("list own posts by author", func(t *testing.T) {
+		resp, err := srv.ListPosts(1, 1, 0, 0, "", "", 1, 10)
 		if err != nil {
 			t.Fatalf("list posts failed: %v", err)
 		}
 		if resp.Total != 2 {
 			t.Errorf("expected total 2, got %d", resp.Total)
+		}
+	})
+
+	t.Run("logged-in feed still public", func(t *testing.T) {
+		resp, err := srv.ListPosts(1, 0, 0, 0, "", "", 1, 10)
+		if err != nil {
+			t.Fatalf("list posts failed: %v", err)
+		}
+		if resp.Total != 2 {
+			t.Errorf("expected total 2 public posts, got %d", resp.Total)
 		}
 	})
 }

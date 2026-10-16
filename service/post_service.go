@@ -312,7 +312,7 @@ func (s *PostService) GetPostByID(userID uint, postID uint) (*types.PostInfo, er
 	return info, nil
 }
 
-func (s *PostService) ListPosts(userID, topicID, petID uint, postType, keyword string, page, pageSize int) (*types.PostListResponse, error) {
+func (s *PostService) ListPosts(viewerID, authorID, topicID, petID uint, postType, keyword string, page, pageSize int) (*types.PostListResponse, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -320,9 +320,24 @@ func (s *PostService) ListPosts(userID, topicID, petID uint, postType, keyword s
 		pageSize = 10
 	}
 
-	posts, total, err := s.postRepo.List(userID, topicID, petID, postType, keyword, page, pageSize)
+	posts, total, err := s.postRepo.List(viewerID, authorID, topicID, petID, postType, keyword, page, pageSize)
 	if err != nil {
 		return nil, err
+	}
+
+	// 他人主页：粉丝可见动态需校验公开关注关系
+	if authorID > 0 && viewerID > 0 && viewerID != authorID && s.followRepo != nil {
+		isPublicFollower, _ := s.followRepo.ExistsPublic(viewerID, authorID)
+		filtered := make([]model.Post, 0, len(posts))
+		for _, post := range posts {
+			if CanViewPost(viewerID, post.UserID, post.Visibility, isPublicFollower) {
+				filtered = append(filtered, post)
+			}
+		}
+		if len(filtered) != len(posts) {
+			total = int64(len(filtered))
+		}
+		posts = filtered
 	}
 
 	postInfos := make([]types.PostInfo, 0, len(posts))
@@ -334,13 +349,57 @@ func (s *PostService) ListPosts(userID, topicID, petID uint, postType, keyword s
 
 	likeMap := make(map[uint]bool)
 	favMap := make(map[uint]bool)
-	if userID > 0 && len(postIDs) > 0 {
-		likeMap, _ = s.likeRepo.GetUserLikeMap(userID, "post", postIDs)
-		favMap, _ = s.favoriteRepo.GetUserFavoriteMap(userID, postIDs)
+	if viewerID > 0 && len(postIDs) > 0 {
+		likeMap, _ = s.likeRepo.GetUserLikeMap(viewerID, "post", postIDs)
+		favMap, _ = s.favoriteRepo.GetUserFavoriteMap(viewerID, postIDs)
 	}
 
 	for i := range postInfos {
 		postInfos[i].IsLiked = likeMap[postInfos[i].ID]
+		postInfos[i].IsFavorited = favMap[postInfos[i].ID]
+		s.enrichPostInfoBasic(&postInfos[i])
+	}
+
+	return &types.PostListResponse{
+		List:     postInfos,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}, nil
+}
+
+// GetLikedPosts 当前用户点赞过的动态列表
+func (s *PostService) GetLikedPosts(userID uint, page, pageSize int) (*types.PostListResponse, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 50 {
+		pageSize = 10
+	}
+
+	likes, total, err := s.likeRepo.ListPostLikesByUser(userID, page, pageSize)
+	if err != nil {
+		return nil, err
+	}
+
+	postInfos := make([]types.PostInfo, 0, len(likes))
+	postIDs := make([]uint, 0, len(likes))
+	for _, like := range likes {
+		post, err := s.postRepo.GetByID(like.TargetID)
+		if err != nil || post.Status != 1 {
+			continue
+		}
+		postIDs = append(postIDs, post.ID)
+		info := s.convertToPostInfo(post)
+		info.IsLiked = true
+		postInfos = append(postInfos, *info)
+	}
+
+	favMap := make(map[uint]bool)
+	if len(postIDs) > 0 {
+		favMap, _ = s.favoriteRepo.GetUserFavoriteMap(userID, postIDs)
+	}
+	for i := range postInfos {
 		postInfos[i].IsFavorited = favMap[postInfos[i].ID]
 		s.enrichPostInfoBasic(&postInfos[i])
 	}

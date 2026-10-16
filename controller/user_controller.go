@@ -6,6 +6,7 @@ import (
 	"pet-community/types"
 	"pet-community/utils"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -118,6 +119,45 @@ func (c *UserController) UpdateProfile(ctx *gin.Context) {
 		return
 	}
 
+	utils.RespondSuccess(ctx, profile)
+}
+
+// UploadAvatar 上传并更新用户头像（multipart field=file）
+func (c *UserController) UploadAvatar(ctx *gin.Context) {
+	userID := ctx.GetUint("user_id")
+
+	fileHeader, err := ctx.FormFile("file")
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "未收到上传文件："+err.Error())
+		return
+	}
+
+	if err := utils.ValidateImageSize(fileHeader.Size, "avatar"); err != nil {
+		utils.RespondError(ctx, types.CodeParamError, err.Error())
+		return
+	}
+
+	f, err := fileHeader.Open()
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "无法读取上传文件")
+		return
+	}
+	defer f.Close()
+
+	ext := ""
+	if idx := strings.LastIndex(fileHeader.Filename, "."); idx >= 0 {
+		ext = fileHeader.Filename[idx+1:]
+	}
+	if ext == "" {
+		utils.RespondError(ctx, types.CodeParamError, "无法识别图片扩展名")
+		return
+	}
+
+	profile, err := c.userService.UploadAvatar(userID, f, ext)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
+		return
+	}
 	utils.RespondSuccess(ctx, profile)
 }
 
@@ -255,6 +295,40 @@ func (c *UserController) ThirdPartyLogin(ctx *gin.Context) {
 	}
 
 	utils.RespondSuccess(ctx, resp)
+}
+
+func (c *UserController) ListThirdPartyAccounts(ctx *gin.Context) {
+	userID := ctx.GetUint("user_id")
+	list, err := c.userService.ListThirdPartyAccounts(userID)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeSystemError, err.Error())
+		return
+	}
+	utils.RespondSuccess(ctx, list)
+}
+
+func (c *UserController) BindThirdPartyAccount(ctx *gin.Context) {
+	userID := ctx.GetUint("user_id")
+	var req types.BindThirdPartyAccountRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		utils.RespondError(ctx, types.CodeParamError, err.Error())
+		return
+	}
+	if err := c.userService.BindThirdPartyAccount(userID, &req); err != nil {
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
+		return
+	}
+	utils.RespondSuccess(ctx, nil)
+}
+
+func (c *UserController) UnbindThirdPartyAccount(ctx *gin.Context) {
+	userID := ctx.GetUint("user_id")
+	platform := ctx.Param("platform")
+	if err := c.userService.UnbindThirdPartyAccount(userID, platform); err != nil {
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
+		return
+	}
+	utils.RespondSuccess(ctx, nil)
 }
 
 func (c *UserController) RefreshToken(ctx *gin.Context) {

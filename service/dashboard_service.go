@@ -210,7 +210,7 @@ func (s *DashboardService) GetTodoAggregate() (*types.TodoAggregate, error) {
 
 	pendingRegistrations, _ := s.adminRepo.CountRegistrationsByStatus(0)
 	items = append(items, types.TodoItem{
-		Key: "pending_registrations", Label: "待审活动报名", Count: int(pendingRegistrations), Link: "/admin/activities/create",
+		Key: "pending_registrations", Label: "待审活动报名", Count: int(pendingRegistrations), Link: "/admin/activities?focus=registrations",
 	})
 
 	total := 0

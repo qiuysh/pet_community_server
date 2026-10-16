@@ -183,8 +183,10 @@ func (s *AdminReportService) applyActionSideEffects(report *model.Report, action
 	}
 	switch report.TargetType {
 	case "post":
-		return s.adminRepo.UpdatePostStatus(report.TargetID, 2)
+		// PostStatusRejected=3（2 为定时待发，不可用作下架）
+		return s.adminRepo.UpdatePostStatus(report.TargetID, PostStatusRejected)
 	case "comment":
+		// 评论：1=通过，2=拒绝（与审核服务一致）
 		return s.adminRepo.UpdateCommentStatus(report.TargetID, 2)
 	}
 	return nil

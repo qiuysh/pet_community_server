@@ -45,6 +45,7 @@ func SetupDiscoveryRoutes(r *gin.RouterGroup, discoveryController *controller.Di
 		topics.GET("/categories", discoveryController.GetTopicCategories)
 		topics.GET("/:id/detail", discoveryController.GetTopicDetail)
 		topics.GET("/:id/posts", discoveryController.GetTopicPosts)
+		topics.GET("/:id/share", discoveryController.ShareTopic)
 		topics.POST("/:id/participate", middleware.UserAuthMiddleware(), discoveryController.ParticipateTopic)
 	}
 }

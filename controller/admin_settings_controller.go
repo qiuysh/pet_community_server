@@ -26,13 +26,26 @@ type UpdateSiteConfigRequest struct {
 	SiteICP         string `json:"siteICP"`
 }
 
+// SiteConfigResponse 与前端 SiteConfig 对齐（camelCase）
+type SiteConfigResponse struct {
+	SiteName        string `json:"siteName"`
+	SiteLogo        string `json:"siteLogo"`
+	SiteDescription string `json:"siteDescription"`
+	SiteICP         string `json:"siteICP"`
+}
+
 func (c *AdminSettingsController) GetSiteConfig(ctx *gin.Context) {
 	config, err := c.adminService.GetSiteConfig()
 	if err != nil {
 		ctx.JSON(200, types.ErrorResponse(types.CodeSystemError, err.Error()))
 		return
 	}
-	ctx.JSON(200, types.SuccessResponse(config))
+	ctx.JSON(200, types.SuccessResponse(SiteConfigResponse{
+		SiteName:        config["site_name"],
+		SiteLogo:        config["site_logo"],
+		SiteDescription: config["site_description"],
+		SiteICP:         config["site_icp"],
+	}))
 }
 
 func (c *AdminSettingsController) UpdateSiteConfig(ctx *gin.Context) {
@@ -65,13 +78,22 @@ type UpdateAuditConfigRequest struct {
 	SensitiveFilterEnabled bool `json:"sensitiveFilterEnabled"`
 }
 
+// AuditConfigResponse 与前端 AuditConfig 对齐（camelCase）
+type AuditConfigResponse struct {
+	AutoAuditEnabled       bool `json:"autoAuditEnabled"`
+	SensitiveFilterEnabled bool `json:"sensitiveFilterEnabled"`
+}
+
 func (c *AdminSettingsController) GetAuditConfig(ctx *gin.Context) {
 	config, err := c.adminService.GetAuditConfig()
 	if err != nil {
 		ctx.JSON(200, types.ErrorResponse(types.CodeSystemError, err.Error()))
 		return
 	}
-	ctx.JSON(200, types.SuccessResponse(config))
+	ctx.JSON(200, types.SuccessResponse(AuditConfigResponse{
+		AutoAuditEnabled:       config["auto_audit_enabled"],
+		SensitiveFilterEnabled: config["sensitive_filter_enabled"],
+	}))
 }
 
 func (c *AdminSettingsController) UpdateAuditConfig(ctx *gin.Context) {

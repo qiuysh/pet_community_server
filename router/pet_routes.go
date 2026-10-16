@@ -17,6 +17,7 @@ func SetupPetRoutes(r *gin.RouterGroup, petController *controller.PetController)
 		auth.Use(middleware.UserAuthMiddleware())
 		{
 			auth.GET("/mine/list", petController.GetMyPets)
+			auth.POST("/upload-avatar", petController.UploadAvatar)
 			auth.POST("/upload-album-photo", petController.UploadAlbumPhoto)
 			auth.POST("/upload-album-video", petController.UploadAlbumVideo)
 			auth.POST("", petController.CreatePet)
@@ -44,6 +45,7 @@ func SetupPetRoutes(r *gin.RouterGroup, petController *controller.PetController)
 		auth := lost.Group("")
 		auth.Use(middleware.UserAuthMiddleware())
 		{
+			auth.POST("/upload-photo", petController.UploadLostPetPhoto)
 			auth.POST("", petController.CreateLostPet)
 			auth.PUT("/:id/status", petController.UpdateLostPetStatus)
 		}

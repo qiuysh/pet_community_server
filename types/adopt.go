@@ -112,7 +112,7 @@ type AdoptionApplicationListResponse struct {
 // 领养审核请求
 type AdoptionReviewRequest struct {
 	ApplicationID uint   `json:"applicationId" binding:"required"`
-	Approve       bool   `json:"approve" binding:"required"`
+	Approve       bool   `json:"approve"` // 勿加 required：false 为零值会被 Gin 拒收
 	Reason        string `json:"reason" binding:"omitempty,max=200"`
 }
 

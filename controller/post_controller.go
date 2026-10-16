@@ -128,15 +128,25 @@ func (c *PostController) GetPost(ctx *gin.Context) {
 }
 
 func (c *PostController) ListPosts(ctx *gin.Context) {
-	userID := ctx.GetUint("user_id")
-	topicIDStr := ctx.Query("topic_id")
-	petIDStr := ctx.Query("pet_id")
+	viewerID := ctx.GetUint("user_id")
+	// 兼容 camelCase / snake_case
+	authorIDStr := firstNonEmpty(ctx.Query("userId"), ctx.Query("user_id"))
+	topicIDStr := firstNonEmpty(ctx.Query("topicId"), ctx.Query("topic_id"))
+	petIDStr := firstNonEmpty(ctx.Query("petId"), ctx.Query("pet_id"))
 	postType := ctx.Query("type")
 	keyword := ctx.Query("keyword")
 	pageStr := ctx.DefaultQuery("page", "1")
-	pageSizeStr := ctx.DefaultQuery("page_size", "10")
+	pageSizeStr := firstNonEmpty(ctx.DefaultQuery("pageSize", ""), ctx.DefaultQuery("page_size", "10"))
+	if pageSizeStr == "" {
+		pageSizeStr = "10"
+	}
 
-	var topicID, petID uint
+	var authorID, topicID, petID uint
+	if authorIDStr != "" {
+		if id, err := strconv.ParseUint(authorIDStr, 10, 32); err == nil {
+			authorID = uint(id)
+		}
+	}
 	if topicIDStr != "" {
 		if id, err := strconv.ParseUint(topicIDStr, 10, 32); err == nil {
 			topicID = uint(id)
@@ -151,12 +161,30 @@ func (c *PostController) ListPosts(ctx *gin.Context) {
 	page, _ := strconv.Atoi(pageStr)
 	pageSize, _ := strconv.Atoi(pageSizeStr)
 
-	result, err := c.postService.ListPosts(userID, topicID, petID, postType, keyword, page, pageSize)
+	result, err := c.postService.ListPosts(viewerID, authorID, topicID, petID, postType, keyword, page, pageSize)
 	if err != nil {
 		utils.RespondError(ctx, types.CodeSystemError, err.Error())
 		return
 	}
 
+	utils.RespondSuccess(ctx, result)
+}
+
+func (c *PostController) GetLikedPosts(ctx *gin.Context) {
+	userID := ctx.GetUint("user_id")
+	pageStr := ctx.DefaultQuery("page", "1")
+	pageSizeStr := firstNonEmpty(ctx.DefaultQuery("pageSize", ""), ctx.DefaultQuery("page_size", "10"))
+	if pageSizeStr == "" {
+		pageSizeStr = "10"
+	}
+	page, _ := strconv.Atoi(pageStr)
+	pageSize, _ := strconv.Atoi(pageSizeStr)
+
+	result, err := c.postService.GetLikedPosts(userID, page, pageSize)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeSystemError, err.Error())
+		return
+	}
 	utils.RespondSuccess(ctx, result)
 }
 
@@ -244,7 +272,10 @@ func (c *PostController) GetLikeList(ctx *gin.Context) {
 func (c *PostController) GetFavorites(ctx *gin.Context) {
 	userID := ctx.GetUint("user_id")
 	pageStr := ctx.DefaultQuery("page", "1")
-	pageSizeStr := ctx.DefaultQuery("page_size", "10")
+	pageSizeStr := firstNonEmpty(ctx.DefaultQuery("pageSize", ""), ctx.DefaultQuery("page_size", "10"))
+	if pageSizeStr == "" {
+		pageSizeStr = "10"
+	}
 
 	page, _ := strconv.Atoi(pageStr)
 	pageSize, _ := strconv.Atoi(pageSizeStr)
@@ -577,4 +608,13 @@ func (c *PostController) ListReports(ctx *gin.Context) {
 	}
 
 	utils.RespondSuccess(ctx, result)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

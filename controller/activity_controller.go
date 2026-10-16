@@ -116,7 +116,7 @@ func (c *ActivityController) GetActivity(ctx *gin.Context) {
 	utils.RespondSuccess(ctx, activity)
 }
 
-// ListActivities 活动列表
+// ListActivities 活动列表（前台）
 func (c *ActivityController) ListActivities(ctx *gin.Context) {
 	userID := ctx.GetUint("user_id")
 	activityType := ctx.Query("type")
@@ -129,6 +129,26 @@ func (c *ActivityController) ListActivities(ctx *gin.Context) {
 	pageSize, _ := strconv.Atoi(pageSizeStr)
 
 	result, err := c.activityService.ListActivities(userID, activityType, status, keyword, page, pageSize)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeSystemError, err.Error())
+		return
+	}
+
+	utils.RespondSuccess(ctx, result)
+}
+
+// ListAdminActivities 管理端活动列表（含草稿）
+func (c *ActivityController) ListAdminActivities(ctx *gin.Context) {
+	activityType := ctx.Query("type")
+	status := ctx.Query("status")
+	keyword := ctx.Query("keyword")
+	pageStr := ctx.DefaultQuery("page", "1")
+	pageSizeStr := ctx.DefaultQuery("page_size", "10")
+
+	page, _ := strconv.Atoi(pageStr)
+	pageSize, _ := strconv.Atoi(pageSizeStr)
+
+	result, err := c.activityService.ListActivitiesForAdmin(activityType, status, keyword, page, pageSize)
 	if err != nil {
 		utils.RespondError(ctx, types.CodeSystemError, err.Error())
 		return

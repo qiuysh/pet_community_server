@@ -8,10 +8,14 @@ import (
 )
 
 func SetupActivityRoutes(r *gin.RouterGroup, activityController *controller.ActivityController) {
-	// 活动管理路由（管理员权限）
+	// 活动管理路由（管理员：super_admin / content_admin）
 	adminActivities := r.Group("/admin/activities")
-	adminActivities.Use(middleware.AuthMiddleware())
+	adminActivities.Use(
+		middleware.AuthMiddleware(),
+		middleware.RequireRole(middleware.RoleSuperAdmin, middleware.RoleContentAdmin),
+	)
 	{
+		adminActivities.GET("", activityController.ListAdminActivities)
 		adminActivities.POST("", activityController.CreateActivity)
 		adminActivities.PUT("/:id", activityController.UpdateActivity)
 		adminActivities.DELETE("/:id", activityController.DeleteActivity)

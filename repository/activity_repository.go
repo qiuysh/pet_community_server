@@ -36,7 +36,7 @@ func (r *ActivityRepository) Delete(id uint) error {
 	return r.db.Delete(&model.Activity{}, id).Error
 }
 
-func (r *ActivityRepository) List(activityType, status, keyword string, page, pageSize int) ([]model.Activity, int64, error) {
+func (r *ActivityRepository) List(activityType, status, keyword string, page, pageSize int, includeDraft bool) ([]model.Activity, int64, error) {
 	var activities []model.Activity
 	var total int64
 	query := r.db.Model(&model.Activity{})
@@ -54,7 +54,12 @@ func (r *ActivityRepository) List(activityType, status, keyword string, page, pa
 			query = query.Where("status = 1 AND end_time < ?", time.Now())
 		} else if status == "draft" {
 			query = query.Where("status = 0")
+		} else if status == "published" {
+			query = query.Where("status = 1")
 		}
+	} else if !includeDraft {
+		// 前台默认不暴露草稿
+		query = query.Where("status <> 0")
 	}
 
 	if keyword != "" {

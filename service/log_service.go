@@ -107,24 +107,3 @@ func (s *LogService) ExportLogs(userID uint, actionType, targetType string, star
 	return []byte(builder.String()), nil
 }
 
-func (s *LogService) GetLogStats(userID uint, actionType string, startTime, endTime time.Time) (map[string]int64, error) {
-	return s.behaviorLogRepo.GetLogStats(userID, actionType, startTime, endTime)
-}
-
-func (s *LogService) GetDailyLogStats(days int) ([]struct {
-	Date  string `json:"date"`
-	Count int64  `json:"count"`
-}, error) {
-	endTime := time.Now()
-	startTime := endTime.AddDate(0, 0, -days)
-	return s.behaviorLogRepo.GetDailyLogStats(startTime, endTime)
-}
-
-func (s *LogService) GetTotalLogsCount() (int64, error) {
-	return s.behaviorLogRepo.Count()
-}
-
-func (s *LogService) GetTodayLogsCount() (int64, error) {
-	today := time.Now().Format("2006-01-02")
-	return s.behaviorLogRepo.CountByDate(today)
-}

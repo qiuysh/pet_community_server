@@ -54,7 +54,6 @@ func RegisterAdminRoutes(router *gin.Engine, ac AdminControllers) {
 			adminLogsRead.GET("/logs/behavior", ac.Logs.GetUserBehaviorLogs)
 			adminLogsRead.GET("/logs/operations-v2", ac.Logs.GetOperationLogsV2)
 			adminLogsRead.GET("/logs/security", ac.Logs.GetSecurityAuditLogs)
-			adminLogsRead.GET("/logs/stats", ac.Logs.GetLogStats)
 		}
 		// ===== 日志导出: super_admin | data_admin =====
 		adminLogsWrite := protected.Group("")

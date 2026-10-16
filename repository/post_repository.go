@@ -36,13 +36,23 @@ func (r *PostRepository) Delete(id uint) error {
 	return r.db.Delete(&model.Post{}, id).Error
 }
 
-func (r *PostRepository) List(userID, topicID, petID uint, postType, keyword string, page, pageSize int) ([]model.Post, int64, error) {
+// List 列出动态。viewerID 为当前访客；authorID>0 时按作者筛选（个人主页）。
+// 未指定作者时返回公开动态流（不因登录态误筛成「仅自己的帖」）。
+func (r *PostRepository) List(viewerID, authorID, topicID, petID uint, postType, keyword string, page, pageSize int) ([]model.Post, int64, error) {
 	var posts []model.Post
 	var total int64
 	query := r.db.Model(&model.Post{}).Where("status = 1")
 
-	if userID > 0 {
-		query = query.Where("user_id = ? AND visibility IN (0, 2)", userID)
+	if authorID > 0 {
+		query = query.Where("user_id = ?", authorID)
+		if viewerID == authorID {
+			// 本人：可见全部可见性
+		} else if viewerID == 0 {
+			query = query.Where("visibility = 0")
+		} else {
+			// 他人：公开 + 粉丝可见（粉丝关系在 service 再细滤）
+			query = query.Where("visibility IN (0, 1)")
+		}
 	} else {
 		query = query.Where("visibility = 0")
 	}
@@ -238,6 +248,26 @@ func (r *LikeRepository) GetUserLikeMap(userID uint, targetType string, targetID
 		result[like.TargetID] = true
 	}
 	return result, nil
+}
+
+// ListPostLikesByUser 用户点赞过的动态 ID（按点赞时间倒序）
+func (r *LikeRepository) ListPostLikesByUser(userID uint, page, pageSize int) ([]model.Like, int64, error) {
+	var likes []model.Like
+	var total int64
+	query := r.db.Model(&model.Like{}).Where("user_id = ? AND target_type = ?", userID, "post")
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	if err := query.Order("id DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&likes).Error; err != nil {
+		return nil, 0, err
+	}
+	return likes, total, nil
 }
 
 func (r *LikeRepository) ListByTarget(targetType string, targetID uint, page, pageSize int) ([]model.Like, int64, error) {

@@ -434,7 +434,7 @@ func (s *DiscoveryService) convertPostsToRecommend(posts []model.Post, userID ui
 	return result
 }
 
-func (s *DiscoveryService) GetCategoryPosts(userID uint, petType, postType, sort string, page, pageSize int) (*types.CategoryPostResponse, error) {
+func (s *DiscoveryService) GetCategoryPosts(userID, categoryID uint, petType, postType, sort string, page, pageSize int) (*types.CategoryPostResponse, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -450,6 +450,21 @@ func (s *DiscoveryService) GetCategoryPosts(userID uint, petType, postType, sort
 		}
 	}
 
+	// 按话题分类：仅当该分类下已有话题时收窄帖子范围
+	if categoryID > 0 {
+		var topicIDs []uint
+		config.DB.Model(&model.Topic{}).Where("category_id = ? AND status = 1", categoryID).Pluck("id", &topicIDs)
+		if len(topicIDs) > 0 {
+			conds := make([]string, 0, len(topicIDs))
+			args := make([]interface{}, 0, len(topicIDs))
+			for _, tid := range topicIDs {
+				conds = append(conds, "topic_ids LIKE ?")
+				args = append(args, "%"+fmt.Sprintf("%d", tid)+"%")
+			}
+			query = query.Where("("+strings.Join(conds, " OR ")+")", args...)
+		}
+	}
+
 	if petType != "" {
 		petIDs := s.getPetIDsByType(petType)
 		if len(petIDs) > 0 {
@@ -458,6 +473,9 @@ func (s *DiscoveryService) GetCategoryPosts(userID uint, petType, postType, sort
 				petIDStrs = append(petIDStrs, fmt.Sprintf("%d", id))
 			}
 			query = query.Where("pet_ids REGEXP ?", "("+strings.Join(petIDStrs, "|")+")")
+		} else {
+			// 指定了宠物品类但无匹配宠物 → 空结果
+			return &types.CategoryPostResponse{List: []types.RecommendPostInfo{}, Total: 0, Page: page, PageSize: pageSize}, nil
 		}
 	}
 
@@ -465,6 +483,8 @@ func (s *DiscoveryService) GetCategoryPosts(userID uint, petType, postType, sort
 		query = query.Where("images != '' AND video = ''")
 	} else if postType == "video" {
 		query = query.Where("video != ''")
+	} else if postType == "text" {
+		query = query.Where("(images = '' OR images IS NULL) AND (video = '' OR video IS NULL)")
 	}
 
 	orderStr := "created_at DESC"
@@ -762,6 +782,21 @@ func (s *DiscoveryService) ParticipateTopic(topicID, userID uint) error {
 		TopicID: topicID,
 		UserID:  userID,
 	})
+}
+
+// ShareTopic 生成话题分享链接（前端可据此复制/出二维码）
+func (s *DiscoveryService) ShareTopic(topicID uint, platform string) (*types.TopicShareResponse, error) {
+	topic, err := s.topicRepo.GetByID(topicID)
+	if err != nil {
+		return nil, errors.New("话题不存在")
+	}
+	if topic.Status != 1 {
+		return nil, errors.New("话题不存在")
+	}
+	_ = platform
+	return &types.TopicShareResponse{
+		ShareURL: fmt.Sprintf("/topics/%d", topic.ID),
+	}, nil
 }
 
 func (s *DiscoveryService) CreateTopic(userID uint, req *types.TopicCreateRequest) (*types.TopicDetailInfo, error) {

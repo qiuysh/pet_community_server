@@ -75,6 +75,11 @@ type TopicDetailInfo struct {
 	CreatedAt         string `json:"createdAt"`
 }
 
+type TopicShareResponse struct {
+	ShareURL string `json:"shareUrl"`
+	QRCode   string `json:"qrCode,omitempty"`
+}
+
 type RecommendPostInfo struct {
 	ID            uint     `json:"id"`
 	UserID        uint     `json:"userId"`

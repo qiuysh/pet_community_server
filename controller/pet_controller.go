@@ -140,6 +140,43 @@ func (c *PetController) GetBreeds(ctx *gin.Context) {
 	utils.RespondSuccess(ctx, breeds)
 }
 
+// UploadAvatar 上传宠物头像（multipart field=file，≤2MB）
+func (c *PetController) UploadAvatar(ctx *gin.Context) {
+	fileHeader, err := ctx.FormFile("file")
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "未收到上传文件："+err.Error())
+		return
+	}
+
+	if err := utils.ValidateImageSize(fileHeader.Size, "avatar"); err != nil {
+		utils.RespondError(ctx, types.CodeParamError, err.Error())
+		return
+	}
+
+	f, err := fileHeader.Open()
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "无法读取上传文件")
+		return
+	}
+	defer f.Close()
+
+	ext := ""
+	if idx := strings.LastIndex(fileHeader.Filename, "."); idx >= 0 {
+		ext = fileHeader.Filename[idx+1:]
+	}
+	if ext == "" {
+		utils.RespondError(ctx, types.CodeParamError, "无法识别图片扩展名")
+		return
+	}
+
+	url, err := c.petService.UploadAvatar(f, ext)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
+		return
+	}
+	utils.RespondSuccess(ctx, &types.UploadPhotoResponse{Url: url})
+}
+
 // UploadAlbumPhoto 上传宠物相册图片（multipart field=file）
 func (c *PetController) UploadAlbumPhoto(ctx *gin.Context) {
 	fileHeader, err := ctx.FormFile("file")
@@ -413,6 +450,43 @@ func (c *PetController) GetGrowthRecords(ctx *gin.Context) {
 		"page":     page,
 		"pageSize": pageSize,
 	})
+}
+
+// UploadLostPetPhoto 上传寻宠启事图片（multipart field=file）
+func (c *PetController) UploadLostPetPhoto(ctx *gin.Context) {
+	fileHeader, err := ctx.FormFile("file")
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "未收到上传文件："+err.Error())
+		return
+	}
+
+	if err := utils.ValidateImageSize(fileHeader.Size, "adopt"); err != nil {
+		utils.RespondError(ctx, types.CodeParamError, err.Error())
+		return
+	}
+
+	f, err := fileHeader.Open()
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "无法读取上传文件")
+		return
+	}
+	defer f.Close()
+
+	ext := ""
+	if idx := strings.LastIndex(fileHeader.Filename, "."); idx >= 0 {
+		ext = fileHeader.Filename[idx+1:]
+	}
+	if ext == "" {
+		utils.RespondError(ctx, types.CodeParamError, "无法识别图片扩展名")
+		return
+	}
+
+	url, err := c.petService.UploadLostPetPhoto(f, ext)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
+		return
+	}
+	utils.RespondSuccess(ctx, &types.UploadPhotoResponse{Url: url})
 }
 
 func (c *PetController) CreateLostPet(ctx *gin.Context) {

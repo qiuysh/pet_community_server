@@ -188,8 +188,17 @@ func (s *ActivityService) GetActivityByID(userID, activityID uint) (*types.Activ
 	return info, nil
 }
 
-// ListActivities 活动列表
+// ListActivities 活动列表（前台：默认不含草稿）
 func (s *ActivityService) ListActivities(userID uint, activityType, status, keyword string, page, pageSize int) (*types.ActivityListResponse, error) {
+	return s.listActivities(userID, activityType, status, keyword, page, pageSize, false)
+}
+
+// ListActivitiesForAdmin 管理端活动列表（可含草稿）
+func (s *ActivityService) ListActivitiesForAdmin(activityType, status, keyword string, page, pageSize int) (*types.ActivityListResponse, error) {
+	return s.listActivities(0, activityType, status, keyword, page, pageSize, true)
+}
+
+func (s *ActivityService) listActivities(userID uint, activityType, status, keyword string, page, pageSize int, includeDraft bool) (*types.ActivityListResponse, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -197,7 +206,7 @@ func (s *ActivityService) ListActivities(userID uint, activityType, status, keyw
 		pageSize = 10
 	}
 
-	activities, total, err := s.activityRepo.List(activityType, status, keyword, page, pageSize)
+	activities, total, err := s.activityRepo.List(activityType, status, keyword, page, pageSize, includeDraft)
 	if err != nil {
 		return nil, err
 	}

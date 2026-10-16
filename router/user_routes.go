@@ -27,6 +27,7 @@ func SetupUserRoutes(r *gin.RouterGroup, userController *controller.UserControll
 	{
 		user.GET("/profile", userController.GetProfile)
 		user.PUT("/profile", userController.UpdateProfile)
+		user.POST("/avatar", userController.UploadAvatar)
 		user.PUT("/password", userController.ChangePassword)
 		user.GET("/devices", userController.GetDevices)
 		user.DELETE("/devices/:deviceId", userController.RemoveDevice)
@@ -36,5 +37,8 @@ func SetupUserRoutes(r *gin.RouterGroup, userController *controller.UserControll
 		user.POST("/unbind-email", userController.UnbindEmail)
 		user.POST("/bind-phone", userController.BindPhone)
 		user.POST("/bind-email", userController.BindEmail)
+		user.GET("/third-party", userController.ListThirdPartyAccounts)
+		user.POST("/third-party/bind", userController.BindThirdPartyAccount)
+		user.DELETE("/third-party/:platform", userController.UnbindThirdPartyAccount)
 	}
 }

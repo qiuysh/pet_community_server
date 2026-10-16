@@ -53,8 +53,8 @@ func TestAdminReportService(t *testing.T) {
 		}
 		var post model.Post
 		db.First(&post, 1)
-		if post.Status != 2 {
-			t.Errorf("expected post status 2 after approve, got %d", post.Status)
+		if post.Status != service.PostStatusRejected {
+			t.Errorf("expected post status rejected(%d) after approve, got %d", service.PostStatusRejected, post.Status)
 		}
 	})
 

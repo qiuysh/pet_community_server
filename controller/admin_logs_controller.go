@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// AdminLogsController 各类日志的读操作:operation/activity/login/behavior/security/stats/export。
+// AdminLogsController 各类日志的读操作:operation/activity/login/behavior/security/export。
 // RBAC: 所有已登录 admin 可见(读接口无需区分 role,rolePermissions 全部 logs:view)。
 type AdminLogsController struct {
 	adminService *service.AdminLogService
@@ -112,36 +112,3 @@ func (c *AdminLogsController) ExportLogs(ctx *gin.Context) {
 	ctx.Data(200, "text/csv; charset=utf-8", data)
 }
 
-func (c *AdminLogsController) GetLogStats(ctx *gin.Context) {
-	userID, _ := parseIntDefault(ctx.Query("userId"), 0)
-	actionType := ctx.Query("actionType")
-	startTime, endTime := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
-	days, _ := parseIntDefault(ctx.DefaultQuery("days", "7"), 7)
-
-	actionStats, err := c.logService.GetLogStats(uint(userID), actionType, startTime, endTime)
-	if err != nil {
-		ctx.JSON(200, types.ErrorResponse(types.CodeSystemError, err.Error()))
-		return
-	}
-	dailyStats, err := c.logService.GetDailyLogStats(days)
-	if err != nil {
-		ctx.JSON(200, types.ErrorResponse(types.CodeSystemError, err.Error()))
-		return
-	}
-	totalCount, err := c.logService.GetTotalLogsCount()
-	if err != nil {
-		ctx.JSON(200, types.ErrorResponse(types.CodeSystemError, err.Error()))
-		return
-	}
-	todayCount, err := c.logService.GetTodayLogsCount()
-	if err != nil {
-		ctx.JSON(200, types.ErrorResponse(types.CodeSystemError, err.Error()))
-		return
-	}
-	ctx.JSON(200, types.SuccessResponse(gin.H{
-		"actionStats": actionStats,
-		"dailyStats":  dailyStats,
-		"totalCount":  totalCount,
-		"todayCount":  todayCount,
-	}))
-}

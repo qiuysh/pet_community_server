@@ -61,4 +61,10 @@ func SetupPostRoutes(r *gin.RouterGroup, postController *controller.PostControll
 	{
 		favorites.GET("", postController.GetFavorites)
 	}
+
+	likes := r.Group("/likes")
+	likes.Use(middleware.UserAuthMiddleware())
+	{
+		likes.GET("", postController.GetLikedPosts)
+	}
 }

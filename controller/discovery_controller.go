@@ -109,16 +109,27 @@ func (c *DiscoveryController) GetRecommendPosts(ctx *gin.Context) {
 
 func (c *DiscoveryController) GetCategoryPosts(ctx *gin.Context) {
 	userID := ctx.GetUint("user_id")
-	petType := ctx.Query("pet_type")
-	postType := ctx.Query("post_type")
+	categoryIDStr := firstNonEmpty(ctx.Query("categoryId"), ctx.Query("category_id"))
+	petType := firstNonEmpty(ctx.Query("petType"), ctx.Query("pet_type"))
+	postType := firstNonEmpty(ctx.Query("postType"), ctx.Query("post_type"))
 	sort := ctx.DefaultQuery("sort", "latest")
 	pageStr := ctx.DefaultQuery("page", "1")
-	pageSizeStr := ctx.DefaultQuery("page_size", "20")
+	pageSizeStr := firstNonEmpty(ctx.DefaultQuery("pageSize", ""), ctx.DefaultQuery("page_size", "20"))
+	if pageSizeStr == "" {
+		pageSizeStr = "20"
+	}
+
+	var categoryID uint
+	if categoryIDStr != "" {
+		if id, err := strconv.ParseUint(categoryIDStr, 10, 32); err == nil {
+			categoryID = uint(id)
+		}
+	}
 
 	page, _ := strconv.Atoi(pageStr)
 	pageSize, _ := strconv.Atoi(pageSizeStr)
 
-	result, err := c.discoveryService.GetCategoryPosts(userID, petType, postType, sort, page, pageSize)
+	result, err := c.discoveryService.GetCategoryPosts(userID, categoryID, petType, postType, sort, page, pageSize)
 	if err != nil {
 		utils.RespondError(ctx, types.CodeSystemError, err.Error())
 		return
@@ -220,6 +231,22 @@ func (c *DiscoveryController) ParticipateTopic(ctx *gin.Context) {
 	}
 
 	utils.RespondSuccess(ctx, nil)
+}
+
+func (c *DiscoveryController) ShareTopic(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	topicID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "话题ID无效")
+		return
+	}
+	platform := ctx.Query("platform")
+	result, err := c.discoveryService.ShareTopic(uint(topicID), platform)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeNotFound, err.Error())
+		return
+	}
+	utils.RespondSuccess(ctx, result)
 }
 
 func (c *DiscoveryController) CreateTopic(ctx *gin.Context) {
