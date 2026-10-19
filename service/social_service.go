@@ -2,11 +2,13 @@ package service
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"pet-community/cache"
 	"pet-community/model"
 	"pet-community/repository"
+	"pet-community/utils"
 )
 
 type BlockService struct {
@@ -113,7 +115,15 @@ func (s *MessageService) SetWebSocketService(wsService *WebSocketService) {
 	s.wsService = wsService
 }
 
+// SendMessage 发送纯文本消息（保留旧签名，兼容已有调用方与测试）
 func (s *MessageService) SendMessage(fromID, toID uint, content string, msgType string) (*model.Message, error) {
+	return s.SendMessageWithMedia(fromID, toID, content, msgType, "", 0)
+}
+
+// SendMessageWithMedia 发送消息，支持图片/语音等媒体消息。
+//
+// mediaURL 必须来自私信上传接口；duration 仅对语音消息生效（秒）。
+func (s *MessageService) SendMessageWithMedia(fromID, toID uint, content string, msgType string, mediaURL string, duration int) (*model.Message, error) {
 	if fromID == toID {
 		return nil, errors.New("不能给自己发消息")
 	}
@@ -157,6 +167,47 @@ func (s *MessageService) SendMessage(fromID, toID uint, content string, msgType 
 		}
 	}
 
+	// 归一化消息类型并按类型做参数校验（校验前置，避免非法请求先建会话）
+	msgType = strings.ToLower(strings.TrimSpace(msgType))
+	if msgType == "" {
+		msgType = model.MessageTypeText
+	}
+	content = strings.TrimSpace(content)
+	mediaURL = strings.TrimSpace(mediaURL)
+
+	switch msgType {
+	case model.MessageTypeText:
+		if content == "" {
+			return nil, errors.New("消息内容不能为空")
+		}
+		mediaURL = ""
+		duration = 0
+	case model.MessageTypeImage:
+		if err := ValidateMessageMediaURL(mediaURL, MessageImageURLPrefix); err != nil {
+			return nil, errors.New("图片地址无效")
+		}
+		duration = 0
+		if content == "" {
+			content = "[图片]"
+		}
+	case model.MessageTypeVoice:
+		if err := ValidateMessageMediaURL(mediaURL, MessageVoiceURLPrefix); err != nil {
+			return nil, errors.New("语音地址无效")
+		}
+		if err := utils.ValidateVoiceDuration(duration); err != nil {
+			return nil, err
+		}
+		if content == "" {
+			content = "[语音]"
+		}
+	default:
+		return nil, errors.New("不支持的消息类型")
+	}
+
+	if err := ValidateMessageContentLength(content); err != nil {
+		return nil, err
+	}
+
 	conversation, err := s.conversationRepo.GetByUsers(fromID, toID)
 	if err != nil {
 		return nil, err
@@ -178,6 +229,8 @@ func (s *MessageService) SendMessage(fromID, toID uint, content string, msgType 
 		ToID:           toID,
 		Content:        content,
 		Type:           msgType,
+		MediaURL:       mediaURL,
+		Duration:       duration,
 		Status:         0,
 	}
 
@@ -185,10 +238,7 @@ func (s *MessageService) SendMessage(fromID, toID uint, content string, msgType 
 		return nil, err
 	}
 
-	preview := content
-	if len(content) > 20 {
-		preview = content[:20] + "..."
-	}
+	preview := buildMessagePreview(msgType, content)
 
 	now := time.Now()
 	if err := s.conversationRepo.UpdateLastMessage(conversation.ID, message.ID, preview, &now); err != nil {
@@ -201,7 +251,7 @@ func (s *MessageService) SendMessage(fromID, toID uint, content string, msgType 
 	cache.IncrMsgUnread(toID)
 
 	if s.wsService != nil {
-		s.wsService.SendMessage(toID, fromID, content, msgType)
+		s.wsService.SendMessage(message)
 	}
 
 	return message, nil
@@ -211,11 +261,33 @@ func (s *MessageService) GetConversations(userID uint, page, pageSize int) ([]mo
 	return s.conversationRepo.ListByUser(userID, page, pageSize)
 }
 
-func (s *MessageService) GetMessages(conversationID uint, page, pageSize int) ([]model.Message, int64, error) {
+// GetMessages 拉取会话消息（仅会话成员可读）
+func (s *MessageService) GetMessages(conversationID, userID uint, page, pageSize int) ([]model.Message, int64, error) {
+	if err := s.EnsureConversationMember(conversationID, userID); err != nil {
+		return nil, 0, err
+	}
 	return s.messageRepo.ListByConversation(conversationID, page, pageSize)
 }
 
+// EnsureConversationMember 校验用户是否属于该会话，防止越权读取/清空他人会话
+func (s *MessageService) EnsureConversationMember(conversationID, userID uint) error {
+	if conversationID == 0 || userID == 0 {
+		return errors.New("无权访问该会话")
+	}
+	conv, err := s.conversationRepo.GetByID(conversationID)
+	if err != nil || conv == nil {
+		return errors.New("会话不存在")
+	}
+	if conv.User1ID != userID && conv.User2ID != userID {
+		return errors.New("无权访问该会话")
+	}
+	return nil
+}
+
 func (s *MessageService) MarkAsRead(conversationID, userID uint) error {
+	if err := s.EnsureConversationMember(conversationID, userID); err != nil {
+		return err
+	}
 	if err := s.messageRepo.MarkAsRead(conversationID, userID); err != nil {
 		return err
 	}
@@ -242,8 +314,27 @@ func (s *MessageService) RecallMessage(messageID, userID uint) error {
 	return s.messageRepo.Recall(messageID)
 }
 
-func (s *MessageService) SearchMessages(conversationID uint, keyword string) ([]model.Message, error) {
-	return s.messageRepo.Search(conversationID, keyword)
+// SearchMessages 会话内搜索文本消息（仅会话成员可搜，支持分页）
+func (s *MessageService) SearchMessages(conversationID, userID uint, keyword string, page, pageSize int) ([]model.Message, int64, error) {
+	if err := s.EnsureConversationMember(conversationID, userID); err != nil {
+		return nil, 0, err
+	}
+	return s.messageRepo.Search(conversationID, keyword, page, pageSize)
+}
+
+// buildMessagePreview 生成会话列表最后一条消息预览
+func buildMessagePreview(msgType, content string) string {
+	switch msgType {
+	case model.MessageTypeImage:
+		return "[图片]"
+	case model.MessageTypeVoice:
+		return "[语音]"
+	}
+	runes := []rune(content)
+	if len(runes) > 20 {
+		return string(runes[:20]) + "..."
+	}
+	return content
 }
 
 func (s *MessageService) DeleteConversation(conversationID, userID uint) error {

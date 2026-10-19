@@ -34,6 +34,8 @@ func SetupSocialRoutes(r *gin.RouterGroup, blockController *controller.BlockCont
 	messages := social.Group("/messages")
 	{
 		messages.POST("/send", messageController.SendMessage)
+		messages.POST("/upload/image", messageController.UploadMessageImage)
+		messages.POST("/upload/voice", messageController.UploadMessageVoice)
 		messages.GET("/conversations", messageController.GetConversations)
 		messages.GET("/:id", messageController.GetMessages)
 		messages.POST("/:id/read", messageController.MarkAsRead)

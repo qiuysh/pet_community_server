@@ -32,21 +32,30 @@ func (Conversation) TableName() string {
 }
 
 type Message struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	ConversationID uint      `gorm:"index;not null" json:"conversationId"`
-	FromID         uint      `gorm:"index;not null" json:"fromId"`
-	ToID           uint      `gorm:"index;not null" json:"toId"`
-	Content        string    `gorm:"type:text" json:"content"`
-	Type           string    `gorm:"size:20;default:text" json:"type"`
-	MediaURL       string    `gorm:"size:255" json:"mediaUrl"`
-	Status         int       `gorm:"default:0" json:"status"`
-	IsRecalled     int       `gorm:"default:0" json:"isRecalled"`
-	CreatedAt      time.Time `gorm:"autoCreateTime" json:"createdAt"`
+	ID             uint   `gorm:"primaryKey" json:"id"`
+	ConversationID uint   `gorm:"index;not null" json:"conversationId"`
+	FromID         uint   `gorm:"index;not null" json:"fromId"`
+	ToID           uint   `gorm:"index;not null" json:"toId"`
+	Content        string `gorm:"type:text" json:"content"`
+	Type           string `gorm:"size:20;default:text" json:"type"`
+	MediaURL       string `gorm:"size:255" json:"mediaUrl"`
+	// Duration 语音时长（秒）；非语音消息为 0
+	Duration   int       `gorm:"not null;default:0" json:"duration"`
+	Status     int       `gorm:"default:0" json:"status"`
+	IsRecalled int       `gorm:"default:0" json:"isRecalled"`
+	CreatedAt  time.Time `gorm:"autoCreateTime" json:"createdAt"`
 }
 
 func (Message) TableName() string {
 	return "messages"
 }
+
+// 消息类型（与 messages.type 列一致）
+const (
+	MessageTypeText  = "text"
+	MessageTypeImage = "image"
+	MessageTypeVoice = "voice"
+)
 
 type UserLevel struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`

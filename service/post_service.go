@@ -1349,6 +1349,12 @@ func (s *CommentService) DeleteComment(userID, commentID uint) error {
 	}
 
 	return s.commentRepo.Transaction(func(tx *gorm.DB) error {
+		// parent_id 不再有外键约束（0 是「顶级评论」的哨兵值），子评论需显式删除。
+		// 评论最多两级，删掉直接子级即可。
+		if err := tx.Where("parent_id = ?", comment.ID).Delete(&model.Comment{}).Error; err != nil {
+			return err
+		}
+
 		if err := tx.Delete(comment).Error; err != nil {
 			return err
 		}

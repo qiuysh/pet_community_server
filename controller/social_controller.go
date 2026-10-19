@@ -1,13 +1,21 @@
 package controller
 
 import (
+	"path/filepath"
+	"strconv"
+	"strings"
+	"unicode/utf8"
+
+	"pet-community/model"
 	"pet-community/service"
 	"pet-community/types"
 	"pet-community/utils"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
+
+// 私信文本长度上限（字符数）
+const maxMessageTextRunes = 500
 
 type BlockController struct {
 	blockService *service.BlockService
@@ -95,35 +103,148 @@ func NewMessageController(messageService *service.MessageService, userService *s
 func (c *MessageController) SendMessage(ctx *gin.Context) {
 	userID := ctx.GetUint("user_id")
 
-	var req struct {
-		ToID    uint   `json:"toId" binding:"required"`
-		Content string `json:"content" binding:"required"`
-		Type    string `json:"type" binding:"omitempty"`
-	}
+	var req types.SendMessageRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		utils.RespondError(ctx, types.CodeParamError, "参数无效")
 		return
 	}
 
-	if req.Type == "" {
-		req.Type = "text"
+	msgType := strings.ToLower(strings.TrimSpace(req.Type))
+	if msgType == "" {
+		msgType = model.MessageTypeText
+	}
+	content := strings.TrimSpace(req.Content)
+	mediaURL := strings.TrimSpace(req.MediaURL)
+
+	switch msgType {
+	case model.MessageTypeText:
+		if content == "" {
+			utils.RespondError(ctx, types.CodeParamError, "消息内容不能为空")
+			return
+		}
+		mediaURL = ""
+		req.Duration = 0
+
+	case model.MessageTypeImage:
+		if err := service.ValidateMessageMediaURL(mediaURL, service.MessageImageURLPrefix); err != nil {
+			utils.RespondError(ctx, types.CodeParamError, "图片地址无效")
+			return
+		}
+		req.Duration = 0
+		if content == "" {
+			content = "[图片]"
+		}
+
+	case model.MessageTypeVoice:
+		if err := service.ValidateMessageMediaURL(mediaURL, service.MessageVoiceURLPrefix); err != nil {
+			utils.RespondError(ctx, types.CodeParamError, "语音地址无效")
+			return
+		}
+		if err := utils.ValidateVoiceDuration(req.Duration); err != nil {
+			utils.RespondError(ctx, types.CodeParamError, err.Error())
+			return
+		}
+		if content == "" {
+			content = "[语音]"
+		}
+
+	default:
+		utils.RespondError(ctx, types.CodeParamError, "不支持的消息类型")
+		return
 	}
 
-	message, err := c.messageService.SendMessage(userID, req.ToID, req.Content, req.Type)
+	if utf8.RuneCountInString(content) > maxMessageTextRunes {
+		utils.RespondError(ctx, types.CodeParamError, "消息内容不能超过500字")
+		return
+	}
+
+	message, err := c.messageService.SendMessageWithMedia(userID, req.ToID, content, msgType, mediaURL, req.Duration)
 	if err != nil {
-		utils.RespondError(ctx, types.CodeSystemError, err.Error())
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
 		return
 	}
 
 	utils.RespondSuccess(ctx, message)
 }
 
+// UploadMessageImage 上传私信图片（multipart field=file，≤2MB）
+func (c *MessageController) UploadMessageImage(ctx *gin.Context) {
+	fileHeader, err := ctx.FormFile("file")
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "未收到上传文件")
+		return
+	}
+	if err := utils.ValidateImageSize(fileHeader.Size, "message"); err != nil {
+		utils.RespondError(ctx, types.CodeParamError, err.Error())
+		return
+	}
+
+	f, err := fileHeader.Open()
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "无法读取上传文件")
+		return
+	}
+	defer f.Close()
+
+	url, err := c.messageService.UploadMessageImage(f, filepath.Ext(fileHeader.Filename))
+	if err != nil {
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
+		return
+	}
+	utils.RespondSuccess(ctx, &types.UploadPhotoResponse{Url: url})
+}
+
+// UploadMessageVoice 上传私信语音（multipart field=file，≤10MB）
+func (c *MessageController) UploadMessageVoice(ctx *gin.Context) {
+	fileHeader, err := ctx.FormFile("file")
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "未收到上传文件")
+		return
+	}
+	if err := utils.ValidateVoiceSize(fileHeader.Size); err != nil {
+		utils.RespondError(ctx, types.CodeParamError, err.Error())
+		return
+	}
+
+	f, err := fileHeader.Open()
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "无法读取上传文件")
+		return
+	}
+	defer f.Close()
+
+	url, err := c.messageService.UploadMessageVoice(f, filepath.Ext(fileHeader.Filename))
+	if err != nil {
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
+		return
+	}
+	utils.RespondSuccess(ctx, &types.UploadPhotoResponse{Url: url})
+}
+
+// parsePageParams 解析分页参数：优先 pageSize，回退 page_size，范围 1-100
+func parsePageParams(ctx *gin.Context) (int, int) {
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+
+	sizeStr := ctx.Query("pageSize")
+	if sizeStr == "" {
+		sizeStr = ctx.DefaultQuery("page_size", "20")
+	}
+	pageSize, _ := strconv.Atoi(sizeStr)
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize
+}
+
 func (c *MessageController) GetConversations(ctx *gin.Context) {
 	userID := ctx.GetUint("user_id")
-	pageStr := ctx.DefaultQuery("page", "1")
-	pageSizeStr := ctx.DefaultQuery("page_size", "20")
-	page, _ := strconv.Atoi(pageStr)
-	pageSize, _ := strconv.Atoi(pageSizeStr)
+	page, pageSize := parsePageParams(ctx)
 
 	conversations, total, err := c.messageService.GetConversations(userID, page, pageSize)
 	if err != nil {
@@ -135,6 +256,7 @@ func (c *MessageController) GetConversations(ctx *gin.Context) {
 }
 
 func (c *MessageController) GetMessages(ctx *gin.Context) {
+	userID := ctx.GetUint("user_id")
 	conversationIDStr := ctx.Param("id")
 	conversationID, err := strconv.ParseUint(conversationIDStr, 10, 32)
 	if err != nil {
@@ -142,14 +264,11 @@ func (c *MessageController) GetMessages(ctx *gin.Context) {
 		return
 	}
 
-	pageStr := ctx.DefaultQuery("page", "1")
-	pageSizeStr := ctx.DefaultQuery("page_size", "20")
-	page, _ := strconv.Atoi(pageStr)
-	pageSize, _ := strconv.Atoi(pageSizeStr)
+	page, pageSize := parsePageParams(ctx)
 
-	messages, total, err := c.messageService.GetMessages(uint(conversationID), page, pageSize)
+	messages, total, err := c.messageService.GetMessages(uint(conversationID), userID, page, pageSize)
 	if err != nil {
-		utils.RespondError(ctx, types.CodeSystemError, err.Error())
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
 		return
 	}
 
@@ -191,6 +310,7 @@ func (c *MessageController) RecallMessage(ctx *gin.Context) {
 }
 
 func (c *MessageController) SearchMessages(ctx *gin.Context) {
+	userID := ctx.GetUint("user_id")
 	conversationIDStr := ctx.Param("id")
 	conversationID, err := strconv.ParseUint(conversationIDStr, 10, 32)
 	if err != nil {
@@ -198,19 +318,24 @@ func (c *MessageController) SearchMessages(ctx *gin.Context) {
 		return
 	}
 
-	keyword := ctx.Query("keyword")
+	keyword := strings.TrimSpace(ctx.Query("keyword"))
 	if keyword == "" {
 		utils.RespondError(ctx, types.CodeParamError, "关键词不能为空")
 		return
 	}
-
-	messages, err := c.messageService.SearchMessages(uint(conversationID), keyword)
-	if err != nil {
-		utils.RespondError(ctx, types.CodeSystemError, err.Error())
+	if utf8.RuneCountInString(keyword) > 50 {
+		utils.RespondError(ctx, types.CodeParamError, "关键词不能超过50字")
 		return
 	}
 
-	utils.RespondSuccess(ctx, messages)
+	page, pageSize := parsePageParams(ctx)
+	messages, total, err := c.messageService.SearchMessages(uint(conversationID), userID, keyword, page, pageSize)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
+		return
+	}
+
+	utils.RespondSuccess(ctx, types.PageResponse(messages, total, page, pageSize))
 }
 
 func (c *MessageController) DeleteConversation(ctx *gin.Context) {

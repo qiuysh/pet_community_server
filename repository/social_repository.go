@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"strings"
 	"time"
 
 	"pet-community/cache"
@@ -195,7 +196,7 @@ func (r *MessageRepository) ListByConversation(conversationID uint, page, pageSi
 		return nil, 0, err
 	}
 
-	if err := query.Limit(pageSize).Offset((page - 1) * pageSize).Order("created_at DESC").Find(&messages).Error; err != nil {
+	if err := query.Limit(pageSize).Offset((page - 1) * pageSize).Order("created_at DESC, id DESC").Find(&messages).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -218,12 +219,31 @@ func (r *MessageRepository) Recall(id uint) error {
 	return r.db.Model(&model.Message{}).Where("id = ?", id).Update("is_recalled", 1).Error
 }
 
-func (r *MessageRepository) Search(conversationID uint, keyword string) ([]model.Message, error) {
+// Search 会话内搜索文本消息
+// - 只命中未被撤回的文本消息，避免 [图片]/[语音] 占位文案污染结果
+// - 关键词中的 % _ 会被转义，使用 ! 作为 ESCAPE 字符（MySQL/SQLite 一致）
+func (r *MessageRepository) Search(conversationID uint, keyword string, page, pageSize int) ([]model.Message, int64, error) {
 	var messages []model.Message
-	if err := r.db.Where("conversation_id = ? AND content LIKE ?", conversationID, "%"+keyword+"%").Order("created_at DESC").Find(&messages).Error; err != nil {
-		return nil, err
+	var total int64
+
+	query := r.db.Model(&model.Message{}).
+		Where("conversation_id = ? AND is_recalled = 0 AND type = ? AND content LIKE ? ESCAPE '!'",
+			conversationID, model.MessageTypeText, "%"+escapeLike(keyword)+"%")
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
-	return messages, nil
+
+	if err := query.Order("created_at DESC, id DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&messages).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return messages, total, nil
+}
+
+// escapeLike 转义 LIKE 通配符
+func escapeLike(s string) string {
+	return strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(s)
 }
 
 func (r *MessageRepository) GetUnreadCount(userID uint) (int64, error) {

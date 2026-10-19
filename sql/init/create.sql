@@ -2,8 +2,10 @@
 -- [初始化] 数据库建库建表 + 系统基础数据
 -- 路径: server/sql/init/create.sql
 -- 适用: 全新环境库一次性执行
--- 版本: v1.2
+-- 版本: v1.3
 -- 创建日期: 2026-07-24
+-- 更新: 2026-10-19 清除死表（pet_photos/pet_records/topic_follows/notifications/feedback/user_login_logs），
+--       补齐活表（user_notifications/announcements/user_activity_logs/admin_login_logs）
 -- ========================================
 
 CREATE DATABASE IF NOT EXISTS pet_community 
@@ -26,7 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
     gender TINYINT DEFAULT 0 COMMENT '性别（0-保密，1-男，2-女）',
     location VARCHAR(100) COMMENT '所在地',
     pet_years VARCHAR(20) COMMENT '养宠年限',
-    privacy_settings JSON DEFAULT '{"visibility": "public", "commentPermission": "all", "atNotification": true, "messagePermission": "all", "recommendEnabled": true}' COMMENT '隐私设置',
+    privacy_settings JSON DEFAULT (JSON_OBJECT('visibility', 'public', 'commentPermission', 'all', 'atNotification', true, 'messagePermission', 'all', 'recommendEnabled', true)) COMMENT '隐私设置',
     status TINYINT DEFAULT 0 COMMENT '状态（0-正常，1-封禁）',
     points INT DEFAULT 0 COMMENT '积分',
     level TINYINT DEFAULT 1 COMMENT '等级（1-10级）',
@@ -34,12 +36,12 @@ CREATE TABLE IF NOT EXISTS users (
     last_login_ip VARCHAR(50) COMMENT '最后登录IP',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    INDEX idx_users_phone (phone),
-    INDEX idx_users_email (email),
+    -- phone/email 唯一索引名与 model.User uniqueIndex（GORM 默认 idx_users_phone/email）对齐，
+    -- 勿再额外建同名非唯一 INDEX，否则 AutoMigrate 会报 Error 1061 Duplicate key name
+    UNIQUE KEY idx_users_phone (phone),
+    UNIQUE KEY idx_users_email (email),
     INDEX idx_users_status (status),
-    INDEX idx_users_created_at (created_at),
-    UNIQUE KEY uk_users_phone (phone),
-    UNIQUE KEY uk_users_email (email)
+    INDEX idx_users_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
 
 -- ========================================
@@ -118,7 +120,7 @@ CREATE TABLE IF NOT EXISTS pets (
     name VARCHAR(50) NOT NULL COMMENT '宠物名称',
     avatar VARCHAR(255) COMMENT '宠物头像',
     pet_type TINYINT NOT NULL COMMENT '宠物类型（1-狗，2-猫）',
-    breed_id BIGINT UNSIGNED COMMENT '品种ID',
+    breed_id BIGINT UNSIGNED DEFAULT 0 COMMENT '品种ID（0=未选品种）',
     breed_name VARCHAR(50) COMMENT '品种名称',
     gender TINYINT DEFAULT 0 COMMENT '性别（0-未知，1-公，2-母）',
     birthday DATE COMMENT '生日',
@@ -136,8 +138,10 @@ CREATE TABLE IF NOT EXISTS pets (
     INDEX idx_pets_user_id (user_id),
     INDEX idx_pets_status (status),
     INDEX idx_pets_pet_type (pet_type),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (breed_id) REFERENCES pet_breeds(id) ON DELETE SET NULL
+    -- breed_id 用 0 作为「未选品种」的哨兵值（Pet.BreedID 为 uint，ORM 零值即 0），
+    -- 因此不能加外键：0 不存在于 pet_breeds(id)，创建宠物不选品种时会报 1452；
+    -- 品种有效性由 PetService 在 BreedID > 0 时调用 GetBreedByID 校验，项目暂无删除品种的功能。
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='宠物表';
 
 -- ========================================
@@ -172,40 +176,6 @@ CREATE TABLE IF NOT EXISTS pet_growth_records (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     INDEX idx_pet_growth_records_pet_id (pet_id),
     INDEX idx_pet_growth_records_record_date (record_date),
-    FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='宠物成长记录表';
-
--- ========================================
--- 宠物照片表（pet_photos）
--- ========================================
-CREATE TABLE IF NOT EXISTS pet_photos (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '照片ID（主键）',
-    pet_id BIGINT UNSIGNED NOT NULL COMMENT '宠物ID（外键）',
-    url VARCHAR(255) NOT NULL COMMENT '照片URL',
-    description VARCHAR(100) COMMENT '照片描述',
-    is_cover TINYINT DEFAULT 0 COMMENT '是否封面（0-否，1-是）',
-    sort_order INT DEFAULT 0 COMMENT '排序顺序',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    INDEX idx_pet_photos_pet_id (pet_id),
-    INDEX idx_pet_photos_is_cover (is_cover),
-    FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='宠物照片表';
-
--- ========================================
--- 宠物记录（pet_records）
--- ========================================
-CREATE TABLE IF NOT EXISTS pet_records (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '记录ID（主键）',
-    pet_id BIGINT UNSIGNED NOT NULL COMMENT '宠物ID（外键）',
-    type VARCHAR(20) NOT NULL COMMENT '记录类型（weight/vaccine/deworm/sickness/event）',
-    content TEXT COMMENT '记录内容',
-    record_date DATE NOT NULL COMMENT '记录日期',
-    next_remind_date DATE COMMENT '下次提醒日期',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    INDEX idx_pet_records_pet_id (pet_id),
-    INDEX idx_pet_records_type (type),
-    INDEX idx_pet_records_record_date (record_date),
-    INDEX idx_pet_records_next_remind (next_remind_date),
     FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='宠物成长记录表';
 
@@ -261,21 +231,6 @@ CREATE TABLE IF NOT EXISTS topic_participants (
     FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='话题参与者表';
-
--- ========================================
--- 话题关注表（topic_follows）
--- ========================================
-CREATE TABLE IF NOT EXISTS topic_follows (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT 'ID（主键）',
-    user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID（外键）',
-    topic_id BIGINT UNSIGNED NOT NULL COMMENT '话题ID（外键）',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    INDEX idx_topic_follows_user_id (user_id),
-    INDEX idx_topic_follows_topic_id (topic_id),
-    UNIQUE KEY uk_topic_follows (user_id, topic_id),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='话题关注表';
 
 -- ========================================
 -- 动态表（posts）
@@ -337,8 +292,8 @@ CREATE TABLE IF NOT EXISTS comments (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '评论ID（主键）',
     post_id BIGINT UNSIGNED NOT NULL COMMENT '动态ID（外键）',
     user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID（外键）',
-    parent_id BIGINT UNSIGNED DEFAULT 0 COMMENT '父评论ID',
-    reply_to_id BIGINT UNSIGNED COMMENT '回复的用户ID',
+    parent_id BIGINT UNSIGNED DEFAULT 0 COMMENT '父评论ID（0=顶级评论）',
+    reply_to_id BIGINT UNSIGNED DEFAULT 0 COMMENT '回复的用户ID（0=无）',
     content VARCHAR(500) NOT NULL COMMENT '评论内容',
     at_users VARCHAR(200) COMMENT '@的用户列表（JSON数组）',
     likes_count INT DEFAULT 0 COMMENT '点赞数',
@@ -351,26 +306,29 @@ CREATE TABLE IF NOT EXISTS comments (
     INDEX idx_comments_parent_id (parent_id),
     INDEX idx_comments_status (status),
     INDEX idx_comments_created_at (created_at DESC),
+    -- parent_id / reply_to_id 用 0 作为「无」的哨兵值（ORM 默认值、查询条件、前端都依赖 0），
+    -- 因此这两列不能加外键：0 不存在于 comments(id) / users(id)，任何插入都会触发 1452。
+    -- 子评论的级联删除由 CommentService.DeleteComment 在事务内显式处理。
     FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (parent_id) REFERENCES comments(id) ON DELETE CASCADE,
-    FOREIGN KEY (reply_to_id) REFERENCES users(id) ON DELETE SET NULL
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='评论表';
 
 -- ========================================
 -- 关注表（follows）
 -- ========================================
+-- 列名与 model.Follow 一致：following_id（被关注者）、status（1-正常 0-已取消）
 CREATE TABLE IF NOT EXISTS follows (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT 'ID（主键）',
     follower_id BIGINT UNSIGNED NOT NULL COMMENT '关注者ID',
-    followed_id BIGINT UNSIGNED NOT NULL COMMENT '被关注者ID',
+    following_id BIGINT UNSIGNED NOT NULL COMMENT '被关注者ID',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '状态（1-正常，0-已取消）',
     is_secret TINYINT DEFAULT 0 COMMENT '是否悄悄关注（0-否，1-是）',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     INDEX idx_follows_follower_id (follower_id),
-    INDEX idx_follows_followed_id (followed_id),
-    UNIQUE KEY uk_follows (follower_id, followed_id),
+    INDEX idx_follows_following_id (following_id),
+    UNIQUE KEY uk_follows (follower_id, following_id),
     FOREIGN KEY (follower_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (followed_id) REFERENCES users(id) ON DELETE CASCADE
+    FOREIGN KEY (following_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='关注表';
 
 -- ========================================
@@ -441,23 +399,24 @@ CREATE TABLE IF NOT EXISTS reports (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='举报表';
 
 -- ========================================
--- 通知表（notifications）
+-- 用户通知表（user_notifications）
+-- 与 model.UserNotification 对齐（旧表名 notifications 已废弃）
 -- ========================================
-CREATE TABLE IF NOT EXISTS notifications (
+CREATE TABLE IF NOT EXISTS user_notifications (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '通知ID（主键）',
-    user_id BIGINT UNSIGNED NOT NULL COMMENT '接收用户ID（外键）',
-    type VARCHAR(20) NOT NULL COMMENT '通知类型（like/comment/follow/at/system）',
-    content TEXT COMMENT '通知内容',
-    target_type VARCHAR(20) COMMENT '目标类型',
-    target_id BIGINT UNSIGNED COMMENT '目标ID',
-    source_user_id BIGINT UNSIGNED COMMENT '来源用户ID',
-    is_read TINYINT DEFAULT 0 COMMENT '是否已读（0-未读，1-已读）',
+    user_id BIGINT UNSIGNED NOT NULL COMMENT '接收用户ID',
+    type VARCHAR(20) NOT NULL COMMENT '通知类型（like/comment/at/system）',
+    title VARCHAR(200) COMMENT '通知标题',
+    content VARCHAR(500) COMMENT '通知内容',
+    trigger_type VARCHAR(20) COMMENT '触发对象类型（post/comment）',
+    trigger_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '触发对象ID',
+    trigger_user_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '触发用户ID',
+    is_read TINYINT NOT NULL DEFAULT 0 COMMENT '是否已读（0-未读，1-已读）',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    INDEX idx_notifications_user_id (user_id),
-    INDEX idx_notifications_is_read (is_read),
-    INDEX idx_notifications_created_at (created_at DESC),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='通知表';
+    INDEX idx_user_notifications_user_id (user_id),
+    INDEX idx_user_notifications_is_read (is_read),
+    INDEX idx_user_notifications_created_at (created_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户通知表';
 
 -- ========================================
 -- 通知设置表（notification_settings）
@@ -508,6 +467,7 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT COMMENT '消息内容',
     type VARCHAR(20) DEFAULT 'text' COMMENT '消息类型（text/image/voice）',
     media_url VARCHAR(255) COMMENT '媒体URL（图片/语音）',
+    duration INT NOT NULL DEFAULT 0 COMMENT '语音时长（秒，非语音为0）',
     status TINYINT DEFAULT 0 COMMENT '状态（0-未读，1-已读）',
     is_recalled TINYINT DEFAULT 0 COMMENT '是否已撤回（0-否，1-是）',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发送时间',
@@ -691,7 +651,7 @@ CREATE TABLE IF NOT EXISTS activity_submissions (
     images TEXT COMMENT '图片URL（JSON数组）',
     video VARCHAR(255) COMMENT '视频URL',
     votes_count INT DEFAULT 0 COMMENT '投票数',
-    rank INT DEFAULT 0 COMMENT '排名',
+    `rank` INT DEFAULT 0 COMMENT '排名',
     is_awarded TINYINT DEFAULT 0 COMMENT '是否获奖',
     award_level VARCHAR(20) COMMENT '获奖等级（first/second/third）',
     status TINYINT DEFAULT 1 COMMENT '状态（0-待审核，1-正常，2-已拒绝）',
@@ -894,59 +854,44 @@ CREATE TABLE IF NOT EXISTS advertisements (
 -- ========================================
 -- 系统通知表（system_notifications）
 -- ========================================
+-- 列定义与 model.SystemNotification + 后台通知表单保持一致（类型为 1/2/3、发送对象为 0/1/2 的数值枚举）
 CREATE TABLE IF NOT EXISTS system_notifications (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '通知ID（主键）',
-    title VARCHAR(100) NOT NULL COMMENT '通知标题',
+    type TINYINT NOT NULL DEFAULT 1 COMMENT '通知类型（1-系统通知，2-公告，3-维护通知）',
+    title VARCHAR(200) NOT NULL COMMENT '通知标题',
     content TEXT NOT NULL COMMENT '通知内容',
-    type VARCHAR(20) NOT NULL COMMENT '通知类型（system/announcement/maintenance）',
-    target_type VARCHAR(20) NOT NULL COMMENT '目标类型（all/user_group/specific）',
-    target_users TEXT COMMENT '目标用户列表（JSON格式）',
-    push_time DATETIME COMMENT '推送时间',
-    status TINYINT DEFAULT 0 COMMENT '状态（0-草稿，1-已发送）',
-    created_by BIGINT UNSIGNED NOT NULL COMMENT '创建人ID',
+    target_type TINYINT NOT NULL DEFAULT 0 COMMENT '发送对象（0-全部用户，1-指定用户组，2-特定用户）',
+    target_ids TEXT COMMENT '目标用户ID列表（英文逗号分隔）',
+    status TINYINT NOT NULL DEFAULT 0 COMMENT '状态（0-草稿，1-已发布）',
+    publish_at DATETIME COMMENT '定时推送时间（空=立即）',
+    admin_id BIGINT UNSIGNED NOT NULL COMMENT '发布管理员ID',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     INDEX idx_system_notifications_type (type),
     INDEX idx_system_notifications_status (status),
-    INDEX idx_system_notifications_push_time (push_time)
+    INDEX idx_system_notifications_publish_at (publish_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统通知表';
 
 -- ========================================
--- 意见反馈表（feedback）
+-- 公告表（announcements）
+-- 与 model.Announcement 对齐
 -- ========================================
-CREATE TABLE IF NOT EXISTS feedback (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '反馈ID（主键）',
-    user_id BIGINT UNSIGNED COMMENT '用户ID（外键）',
-    type VARCHAR(20) NOT NULL COMMENT '类型（suggestion/bug/other）',
-    content TEXT NOT NULL COMMENT '反馈内容',
-    contact_info VARCHAR(100) COMMENT '联系方式',
-    images VARCHAR(500) COMMENT '图片URL（JSON数组）',
-    status TINYINT DEFAULT 0 COMMENT '状态（0-待处理，1-处理中，2-已处理，3-已关闭）',
-    reply TEXT COMMENT '回复内容',
-    replied_by BIGINT UNSIGNED COMMENT '回复人ID（后台用户）',
+CREATE TABLE IF NOT EXISTS announcements (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '公告ID（主键）',
+    title VARCHAR(200) NOT NULL COMMENT '公告标题',
+    content TEXT NOT NULL COMMENT '公告内容',
+    type TINYINT NOT NULL DEFAULT 1 COMMENT '公告类型',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '状态（0-下线，1-上线）',
+    sort_order INT NOT NULL DEFAULT 0 COMMENT '排序（越大越靠前）',
+    admin_id BIGINT UNSIGNED NOT NULL COMMENT '发布管理员ID',
+    start_at DATETIME COMMENT '生效开始时间',
+    end_at DATETIME COMMENT '生效结束时间',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    replied_at DATETIME COMMENT '回复时间',
-    INDEX idx_feedback_user_id (user_id),
-    INDEX idx_feedback_type (type),
-    INDEX idx_feedback_status (status),
-    INDEX idx_feedback_created_at (created_at DESC),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='意见反馈表';
-
--- ========================================
--- 用户登录日志表（user_login_logs）
--- ========================================
-CREATE TABLE IF NOT EXISTS user_login_logs (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '日志ID（主键）',
-    user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID（外键）',
-    ip VARCHAR(50) COMMENT '登录IP',
-    user_agent VARCHAR(255) COMMENT '用户代理',
-    login_type VARCHAR(20) COMMENT '登录方式（password/phone/email）',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '登录时间',
-    INDEX idx_user_login_logs_user_id (user_id),
-    INDEX idx_user_login_logs_created_at (created_at DESC),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户登录日志表';
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX idx_announcements_type (type),
+    INDEX idx_announcements_status (status),
+    INDEX idx_announcements_sort_order (sort_order DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='公告表';
 
 -- ========================================
 -- 用户行为日志表（user_behavior_logs）
@@ -966,6 +911,23 @@ CREATE TABLE IF NOT EXISTS user_behavior_logs (
     INDEX idx_user_behavior_logs_created_at (created_at),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户行为日志表';
+
+-- ========================================
+-- 用户活动日志表（user_activity_logs）
+-- 与 model.UserActivityLog 对齐
+-- ========================================
+CREATE TABLE IF NOT EXISTS user_activity_logs (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '日志ID（主键）',
+    user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
+    action VARCHAR(100) NOT NULL COMMENT '动作',
+    target_type VARCHAR(50) COMMENT '目标类型',
+    target_id BIGINT UNSIGNED COMMENT '目标ID',
+    ip VARCHAR(50) COMMENT 'IP地址',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    INDEX idx_user_activity_logs_user_id (user_id),
+    INDEX idx_user_activity_logs_action (action),
+    INDEX idx_user_activity_logs_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户活动日志表';
 
 -- ========================================
 -- 搜索历史表（search_histories）
@@ -1001,11 +963,11 @@ CREATE TABLE IF NOT EXISTS hot_keywords (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT 'ID（主键）',
     keyword VARCHAR(100) NOT NULL COMMENT '关键词',
     search_count INT DEFAULT 0 COMMENT '搜索次数',
-    rank INT DEFAULT 0 COMMENT '排名',
+    `rank` INT DEFAULT 0 COMMENT '排名',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     INDEX idx_hot_keywords_keyword (keyword),
-    INDEX idx_hot_keywords_rank (rank),
+    INDEX idx_hot_keywords_rank (`rank`),
     UNIQUE KEY uk_hot_keywords_keyword (keyword)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='热关键词表';
 
@@ -1050,6 +1012,25 @@ CREATE TABLE IF NOT EXISTS admin_operation_logs (
     INDEX idx_admin_operation_logs_created_at (created_at DESC),
     FOREIGN KEY (admin_id) REFERENCES admin_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='后台操作日志表';
+
+-- ========================================
+-- 后台登录日志表（admin_login_logs）
+-- 与 model.AdminLoginLog 对齐
+-- ========================================
+CREATE TABLE IF NOT EXISTS admin_login_logs (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '日志ID（主键）',
+    admin_id BIGINT UNSIGNED NOT NULL COMMENT '管理员ID',
+    username VARCHAR(50) NOT NULL COMMENT '登录用户名',
+    ip VARCHAR(50) COMMENT '登录IP',
+    user_agent VARCHAR(500) COMMENT '用户代理',
+    device VARCHAR(100) COMMENT '设备信息',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '状态（1-成功，0-失败）',
+    fail_reason VARCHAR(255) COMMENT '失败原因',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '登录时间',
+    INDEX idx_admin_login_logs_admin_id (admin_id),
+    INDEX idx_admin_login_logs_status (status),
+    INDEX idx_admin_login_logs_created_at (created_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='后台登录日志表';
 
 -- ========================================
 -- 敏感词表（sensitive_words）
@@ -1111,16 +1092,16 @@ CREATE TABLE IF NOT EXISTS daily_stats (
 -- 初始化默认数据
 -- ========================================
 
+-- 密码统一为: admin123 (BCrypt cost=10；与 content_admin 等同明文校验通过)
 INSERT INTO admin_users (username, password, real_name, email, role, status)
-SELECT 'admin', '$2a$10$N9qo8uLOickgx2ZMRZoMye.IjzqAKL9xL5jvMFVdNJHvGCgTq/VEq', '系统管理员', 'admin@petcommunity.com', 'super_admin', 1
+SELECT 'admin', '$2a$10$PtAxeDxVakM6hfgrX51KOudn1dMKt5bKfP1J4O/JWwAr.4WwNF2bi', '系统管理员', 'admin@petcommunity.com', 'super_admin', 1
 WHERE NOT EXISTS (SELECT 1 FROM admin_users WHERE username = 'admin');
 
--- 密码统一为: admin123 (BCrypt 加密, cost=10, 与 server/cmd/main.go 自动创建的 admin 账号一致)
 INSERT INTO admin_users (username, password, email, role, status) VALUES
 ('content_admin', '$2a$10$PtAxeDxVakM6hfgrX51KOudn1dMKt5bKfP1J4O/JWwAr.4WwNF2bi', 'content@petcommunity.com', 'content_admin', 1),
 ('data_admin', '$2a$10$Csc4LowlvrdPeWORZv2xkebtv6.lWDv16rt0pN7R4foul3HXx8AMG', 'data@petcommunity.com', 'data_admin', 1),
 ('service', '$2a$10$KSq2fiRVmOB.5zxSWqwiOepR/GRcj5YLFurDRjsJ7sV6/uphX8Ira', 'service@petcommunity.com', 'service', 1)
-ON DUPLICATE KEY UPDATE updated_at = NOW();
+ON DUPLICATE KEY UPDATE password = VALUES(password), updated_at = NOW();
 
 INSERT INTO topic_categories (name, sort_order, status) VALUES
 ('日常分享', 1, 1),
@@ -1128,7 +1109,7 @@ INSERT INTO topic_categories (name, sort_order, status) VALUES
 ('美食教程', 3, 1),
 ('健康医疗', 4, 1),
 ('萌宠趣事', 5, 1)
-ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP;
+ON DUPLICATE KEY UPDATE sort_order = VALUES(sort_order), status = VALUES(status);
 
 INSERT INTO topics (category_id, name, description, status) VALUES
 (1, '萌宠日常', '分享宠物的日常生活点滴', 1),
@@ -1222,63 +1203,67 @@ INSERT INTO points_rules (type, points, description, is_active, daily_limit) VAL
 ('activity_join', 20, '参加活动', 1, 5)
 ON DUPLICATE KEY UPDATE points = VALUES(points), description = VALUES(description), is_active = VALUES(is_active), daily_limit = VALUES(daily_limit), updated_at = CURRENT_TIMESTAMP;
 
-INSERT INTO level_benefits (level, benefit_type, benefit_value, description) VALUES
-(1, 'level_name', '铲屎官', '等级名称'),
-(1, 'points_required', '0', '升级所需积分'),
-(1, 'post_limit', '3', '每日发布动态上限'),
-(1, 'image_limit', '3', '单条动态图片上限'),
-(2, 'level_name', '初级铲屎官', '等级名称'),
-(2, 'points_required', '100', '升级所需积分'),
-(2, 'post_limit', '5', '每日发布动态上限'),
-(2, 'image_limit', '5', '单条动态图片上限'),
-(3, 'level_name', '中级铲屎官', '等级名称'),
-(3, 'points_required', '500', '升级所需积分'),
-(3, 'post_limit', '8', '每日发布动态上限'),
-(3, 'image_limit', '9', '单条动态图片上限'),
-(4, 'level_name', '高级铲屎官', '等级名称'),
-(4, 'points_required', '1000', '升级所需积分'),
-(4, 'post_limit', '10', '每日发布动态上限'),
-(4, 'image_limit', '9', '单条动态图片上限'),
-(5, 'level_name', '资深铲屎官', '等级名称'),
-(5, 'points_required', '2000', '升级所需积分'),
-(5, 'post_limit', '15', '每日发布动态上限'),
-(5, 'image_limit', '9', '单条动态图片上限'),
-(5, 'feature_priority', '1', '精选优先'),
-(6, 'level_name', '宠物达人', '等级名称'),
-(6, 'points_required', '5000', '升级所需积分'),
-(6, 'post_limit', '20', '每日发布动态上限'),
-(6, 'image_limit', '9', '单条动态图片上限'),
-(6, 'feature_priority', '2', '精选优先'),
-(7, 'level_name', '宠物专家', '等级名称'),
-(7, 'points_required', '10000', '升级所需积分'),
-(7, 'post_limit', '30', '每日发布动态上限'),
-(7, 'image_limit', '9', '单条动态图片上限'),
-(7, 'feature_priority', '3', '精选优先'),
-(8, 'level_name', '宠物大师', '等级名称'),
-(8, 'points_required', '20000', '升级所需积分'),
-(8, 'post_limit', '50', '每日发布动态上限'),
-(8, 'image_limit', '9', '单条动态图片上限'),
-(8, 'feature_priority', '4', '精选优先'),
-(9, 'level_name', '宠物宗师', '等级名称'),
-(9, 'points_required', '50000', '升级所需积分'),
-(9, 'post_limit', '100', '每日发布动态上限'),
-(9, 'image_limit', '9', '单条动态图片上限'),
-(9, 'feature_priority', '5', '精选优先'),
-(10, 'level_name', '宠物之神', '等级名称'),
-(10, 'points_required', '100000', '升级所需积分'),
-(10, 'post_limit', '999', '每日发布动态上限'),
-(10, 'image_limit', '9', '单条动态图片上限'),
-(10, 'feature_priority', '10', '精选优先')
-ON DUPLICATE KEY UPDATE benefit_value = VALUES(benefit_value), description = VALUES(description), updated_at = CURRENT_TIMESTAMP;
+INSERT INTO level_benefits (level, benefit_type, benefit_value, description)
+SELECT * FROM (
+    SELECT 1 AS level, 'level_name' AS benefit_type, '铲屎官' AS benefit_value, '等级名称' AS description
+    UNION ALL SELECT 1, 'points_required', '0', '升级所需积分'
+    UNION ALL SELECT 1, 'post_limit', '3', '每日发布动态上限'
+    UNION ALL SELECT 1, 'image_limit', '3', '单条动态图片上限'
+    UNION ALL SELECT 2, 'level_name', '初级铲屎官', '等级名称'
+    UNION ALL SELECT 2, 'points_required', '100', '升级所需积分'
+    UNION ALL SELECT 2, 'post_limit', '5', '每日发布动态上限'
+    UNION ALL SELECT 2, 'image_limit', '5', '单条动态图片上限'
+    UNION ALL SELECT 3, 'level_name', '中级铲屎官', '等级名称'
+    UNION ALL SELECT 3, 'points_required', '500', '升级所需积分'
+    UNION ALL SELECT 3, 'post_limit', '8', '每日发布动态上限'
+    UNION ALL SELECT 3, 'image_limit', '9', '单条动态图片上限'
+    UNION ALL SELECT 4, 'level_name', '高级铲屎官', '等级名称'
+    UNION ALL SELECT 4, 'points_required', '1000', '升级所需积分'
+    UNION ALL SELECT 4, 'post_limit', '10', '每日发布动态上限'
+    UNION ALL SELECT 4, 'image_limit', '9', '单条动态图片上限'
+    UNION ALL SELECT 5, 'level_name', '资深铲屎官', '等级名称'
+    UNION ALL SELECT 5, 'points_required', '2000', '升级所需积分'
+    UNION ALL SELECT 5, 'post_limit', '15', '每日发布动态上限'
+    UNION ALL SELECT 5, 'image_limit', '9', '单条动态图片上限'
+    UNION ALL SELECT 5, 'feature_priority', '1', '精选优先'
+    UNION ALL SELECT 6, 'level_name', '宠物达人', '等级名称'
+    UNION ALL SELECT 6, 'points_required', '5000', '升级所需积分'
+    UNION ALL SELECT 6, 'post_limit', '20', '每日发布动态上限'
+    UNION ALL SELECT 6, 'image_limit', '9', '单条动态图片上限'
+    UNION ALL SELECT 6, 'feature_priority', '2', '精选优先'
+    UNION ALL SELECT 7, 'level_name', '宠物专家', '等级名称'
+    UNION ALL SELECT 7, 'points_required', '10000', '升级所需积分'
+    UNION ALL SELECT 7, 'post_limit', '30', '每日发布动态上限'
+    UNION ALL SELECT 7, 'image_limit', '9', '单条动态图片上限'
+    UNION ALL SELECT 7, 'feature_priority', '3', '精选优先'
+    UNION ALL SELECT 8, 'level_name', '宠物大师', '等级名称'
+    UNION ALL SELECT 8, 'points_required', '20000', '升级所需积分'
+    UNION ALL SELECT 8, 'post_limit', '50', '每日发布动态上限'
+    UNION ALL SELECT 8, 'image_limit', '9', '单条动态图片上限'
+    UNION ALL SELECT 8, 'feature_priority', '4', '精选优先'
+    UNION ALL SELECT 9, 'level_name', '宠物宗师', '等级名称'
+    UNION ALL SELECT 9, 'points_required', '50000', '升级所需积分'
+    UNION ALL SELECT 9, 'post_limit', '100', '每日发布动态上限'
+    UNION ALL SELECT 9, 'image_limit', '9', '单条动态图片上限'
+    UNION ALL SELECT 9, 'feature_priority', '5', '精选优先'
+    UNION ALL SELECT 10, 'level_name', '宠物之神', '等级名称'
+    UNION ALL SELECT 10, 'points_required', '100000', '升级所需积分'
+    UNION ALL SELECT 10, 'post_limit', '999', '每日发布动态上限'
+    UNION ALL SELECT 10, 'image_limit', '9', '单条动态图片上限'
+    UNION ALL SELECT 10, 'feature_priority', '10', '精选优先'
+) AS seed
+WHERE NOT EXISTS (SELECT 1 FROM level_benefits LIMIT 1);
 
-INSERT INTO ad_positions (name, location, size, status) VALUES
-('首页Banner', 'home_banner', '1920x400', 1),
-('开屏广告', 'splash', '1920x1080', 1),
-('详情页广告', 'detail_sidebar', '300x250', 1),
-('话题页广告', 'topic_banner', '800x200', 1)
-ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP;
+INSERT INTO ad_positions (name, location, size, status)
+SELECT * FROM (
+    SELECT '首页Banner' AS name, 'home_banner' AS location, '1920x400' AS size, 1 AS status
+    UNION ALL SELECT '开屏广告', 'splash', '1920x1080', 1
+    UNION ALL SELECT '详情页广告', 'detail_sidebar', '300x250', 1
+    UNION ALL SELECT '话题页广告', 'topic_banner', '800x200', 1
+) AS seed
+WHERE NOT EXISTS (SELECT 1 FROM ad_positions LIMIT 1);
 
-INSERT INTO hot_keywords (keyword, search_count, rank) VALUES
+INSERT INTO hot_keywords (keyword, search_count, `rank`) VALUES
 ('猫咪', 1200, 1),
 ('狗狗', 980, 2),
 ('泰迪', 750, 3),
@@ -1289,19 +1274,22 @@ INSERT INTO hot_keywords (keyword, search_count, rank) VALUES
 ('哈士奇', 380, 8),
 ('龙猫', 320, 9),
 ('仓鼠', 280, 10)
-ON DUPLICATE KEY UPDATE search_count = VALUES(search_count), rank = VALUES(rank), updated_at = CURRENT_TIMESTAMP;
+ON DUPLICATE KEY UPDATE search_count = VALUES(search_count), `rank` = VALUES(`rank`);
 
-INSERT INTO system_notifications (title, content, type, target_type, status, created_by) VALUES
-('欢迎加入宠物社区', '欢迎您加入我们的宠物社区！在这里您可以分享宠物日常、参加活动、结交志同道合的朋友。', 'system', 'all', 1, 1),
-('活动报名成功通知', '您已成功报名参加活动，请按时参加！', 'system', 'specific', 0, 1),
-('领养申请审核结果', '您的领养申请已审核，请查看详情。', 'system', 'specific', 0, 1)
-ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP;
+INSERT INTO system_notifications (type, title, content, target_type, status, admin_id)
+SELECT * FROM (
+    SELECT 1 AS type, '欢迎加入宠物社区' AS title, '欢迎您加入我们的宠物社区！在这里您可以分享宠物日常、参加活动、结交志同道合的朋友。' AS content, 0 AS target_type, 1 AS status, 1 AS admin_id
+    UNION ALL SELECT 1, '活动报名成功通知', '您已成功报名参加活动，请按时参加！', 2, 0, 1
+    UNION ALL SELECT 1, '领养申请审核结果', '您的领养申请已审核，请查看详情。', 2, 0, 1
+) AS seed
+WHERE NOT EXISTS (SELECT 1 FROM system_notifications LIMIT 1);
 
 -- ========================================
 -- 创建视图
 -- ========================================
 
-CREATE VIEW IF NOT EXISTS v_user_stats AS
+DROP VIEW IF EXISTS v_user_stats;
+CREATE VIEW v_user_stats AS
 SELECT 
     COUNT(*) as total_users,
     SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as active_users,
@@ -1311,7 +1299,8 @@ SELECT
 FROM users
 GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d');
 
-CREATE VIEW IF NOT EXISTS v_post_stats AS
+DROP VIEW IF EXISTS v_post_stats;
+CREATE VIEW v_post_stats AS
 SELECT 
     COUNT(*) as total_posts,
     SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as published_posts,
@@ -1324,7 +1313,8 @@ SELECT
 FROM posts
 GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d');
 
-CREATE VIEW IF NOT EXISTS v_hot_topics AS
+DROP VIEW IF EXISTS v_hot_topics;
+CREATE VIEW v_hot_topics AS
 SELECT 
     t.id,
     t.name,
@@ -1336,11 +1326,12 @@ FROM topics t
 WHERE t.status = 1
 ORDER BY t.posts_count DESC, t.created_at DESC;
 
-CREATE VIEW IF NOT EXISTS v_user_detail AS
+DROP VIEW IF EXISTS v_user_detail;
+CREATE VIEW v_user_detail AS
 SELECT 
     u.*,
-    (SELECT COUNT(*) FROM follows WHERE followed_id = u.id) as follower_count,
-    (SELECT COUNT(*) FROM follows WHERE follower_id = u.id) as following_count,
+    (SELECT COUNT(*) FROM follows WHERE following_id = u.id AND status = 1) as follower_count,
+    (SELECT COUNT(*) FROM follows WHERE follower_id = u.id AND status = 1) as following_count,
     (SELECT COUNT(*) FROM posts WHERE user_id = u.id AND status = 1) as post_count,
     (SELECT COUNT(*) FROM pets WHERE user_id = u.id) as pet_count
 FROM users u;
@@ -1350,7 +1341,8 @@ FROM users u;
 -- ========================================
 
 DELIMITER //
-CREATE PROCEDURE IF NOT EXISTS GetUserStats(IN start_date DATE, IN end_date DATE)
+DROP PROCEDURE IF EXISTS GetUserStats //
+CREATE PROCEDURE GetUserStats(IN start_date DATE, IN end_date DATE)
 BEGIN
     SELECT 
         COUNT(*) as total_users,
@@ -1362,7 +1354,8 @@ END //
 DELIMITER ;
 
 DELIMITER //
-CREATE PROCEDURE IF NOT EXISTS GetPostStats(IN start_date DATE, IN end_date DATE)
+DROP PROCEDURE IF EXISTS GetPostStats //
+CREATE PROCEDURE GetPostStats(IN start_date DATE, IN end_date DATE)
 BEGIN
     SELECT 
         COUNT(*) as total_posts,
@@ -1378,23 +1371,28 @@ END //
 DELIMITER ;
 
 DELIMITER //
-CREATE PROCEDURE IF NOT EXISTS GetUserProfile(IN user_id BIGINT)
+DROP PROCEDURE IF EXISTS GetUserProfile //
+CREATE PROCEDURE GetUserProfile(IN user_id BIGINT)
 BEGIN
     SELECT 
         u.*,
-        COALESCE(f.follower_count, 0) as follower_count,
-        COALESCE(f.following_count, 0) as following_count,
+        COALESCE(fr.follower_count, 0) as follower_count,
+        COALESCE(fg.following_count, 0) as following_count,
         COALESCE(p.post_count, 0) as post_count,
         COALESCE(pt.pet_count, 0) as pet_count
     FROM users u
     LEFT JOIN (
-        SELECT 
-            followed_id,
-            COUNT(*) as follower_count,
-            SUM(CASE WHEN is_secret = 0 THEN 1 ELSE 0 END) as following_count
+        SELECT following_id, COUNT(*) as follower_count
         FROM follows
-        GROUP BY followed_id
-    ) f ON u.id = f.followed_id
+        WHERE status = 1
+        GROUP BY following_id
+    ) fr ON u.id = fr.following_id
+    LEFT JOIN (
+        SELECT follower_id, COUNT(*) as following_count
+        FROM follows
+        WHERE status = 1
+        GROUP BY follower_id
+    ) fg ON u.id = fg.follower_id
     LEFT JOIN (
         SELECT user_id, COUNT(*) as post_count
         FROM posts
@@ -1465,24 +1463,6 @@ END //
 DELIMITER ;
 
 DELIMITER //
-CREATE TRIGGER IF NOT EXISTS tr_topic_follow_add
-AFTER INSERT ON topic_follows
-FOR EACH ROW
-BEGIN
-    UPDATE topics SET followers_count = followers_count + 1 WHERE id = NEW.topic_id;
-END //
-DELIMITER ;
-
-DELIMITER //
-CREATE TRIGGER IF NOT EXISTS tr_topic_follow_remove
-AFTER DELETE ON topic_follows
-FOR EACH ROW
-BEGIN
-    UPDATE topics SET followers_count = followers_count - 1 WHERE id = OLD.topic_id;
-END //
-DELIMITER ;
-
-DELIMITER //
 CREATE TRIGGER IF NOT EXISTS tr_vote_add
 AFTER INSERT ON activity_votes
 FOR EACH ROW
@@ -1505,7 +1485,8 @@ DELIMITER ;
 -- ========================================
 
 DELIMITER //
-CREATE FUNCTION IF NOT EXISTS GetUserLevelName(level TINYINT) RETURNS VARCHAR(20)
+DROP FUNCTION IF EXISTS GetUserLevelName //
+CREATE FUNCTION GetUserLevelName(level TINYINT) RETURNS VARCHAR(20)
 DETERMINISTIC
 BEGIN
     DECLARE level_name VARCHAR(20);
@@ -1527,7 +1508,8 @@ END //
 DELIMITER ;
 
 DELIMITER //
-CREATE FUNCTION IF NOT EXISTS GetRelativeTime(datetime_val DATETIME) RETURNS VARCHAR(50)
+DROP FUNCTION IF EXISTS GetRelativeTime //
+CREATE FUNCTION GetRelativeTime(datetime_val DATETIME) RETURNS VARCHAR(50)
 DETERMINISTIC
 BEGIN
     DECLARE diff_seconds INT;
