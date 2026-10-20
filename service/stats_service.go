@@ -90,8 +90,10 @@ func (s *StatsService) calculateOverviewStats(date string) *types.OverviewStats 
 }
 
 func (s *StatsService) CalculateStats() error {
-	today := time.Now().Format("2006-01-02")
-	todayDate, _ := time.Parse("2006-01-02", today)
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	// 用本地日历日 00:00，避免 time.Parse 默认 UTC 导致 MySQL DATE 比对偏移
+	todayDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 
 	return s.statsRepo.Transaction(func(tx *gorm.DB) error {
 		var userCount int64

@@ -112,6 +112,22 @@ func TestStatsServiceCalculateStats(t *testing.T) {
 			t.Errorf("expected post count 1, got %d", stats.PostCount)
 		}
 	})
+
+	t.Run("idempotent upsert same day", func(t *testing.T) {
+		if err := srv.CalculateStats(); err != nil {
+			t.Fatalf("first calculate: %v", err)
+		}
+		if err := srv.CalculateStats(); err != nil {
+			t.Fatalf("second calculate should update not 1062: %v", err)
+		}
+		var count int64
+		if err := db.Model(&model.Statistics{}).Count(&count).Error; err != nil {
+			t.Fatalf("count daily_stats: %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("expected 1 daily_stats row for today, got %d", count)
+		}
+	})
 }
 
 func TestStatsServiceGetTrendData(t *testing.T) {

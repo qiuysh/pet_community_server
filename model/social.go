@@ -59,7 +59,7 @@ const (
 
 type UserLevel struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	UserID      uint      `gorm:"uniqueIndex;not null" json:"userId"`
+	UserID      uint      `gorm:"uniqueIndex:idx_user_levels_user_id;not null" json:"userId"`
 	Level       int       `gorm:"default:1" json:"level"`
 	Points      int       `gorm:"default:0" json:"points"`
 	TotalPoints int       `gorm:"default:0" json:"totalPoints"`
@@ -116,7 +116,7 @@ func (LevelBenefit) TableName() string {
 
 type NotificationSettings struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
-	UserID        uint      `gorm:"uniqueIndex;not null" json:"userId"`
+	UserID        uint      `gorm:"uniqueIndex:idx_notification_settings_user_id;not null" json:"userId"`
 	LikeNotify    int       `gorm:"default:1" json:"likeNotify"`
 	CommentNotify int       `gorm:"default:1" json:"commentNotify"`
 	AtNotify      int       `gorm:"default:1" json:"atNotify"`

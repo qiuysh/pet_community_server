@@ -1,21 +1,17 @@
 package service
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"os"
-	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
 	"pet-community/model"
 	"pet-community/repository"
 	"pet-community/types"
 	"pet-community/utils"
-	"strconv"
-	"strings"
-	"time"
 
 	"gorm.io/gorm"
 )
@@ -547,8 +543,8 @@ func validatePhotos(photos []string) error {
 	return nil
 }
 
-// UploadAdoptPhoto 上传领养照片（本地磁盘保存，返回可被前端直接访问的 URL）
-// maxSize 单位字节，默认 5MB（2048*1024 的 2x 作为安全边界）
+// UploadAdoptPhoto 上传领养照片（≤5MB），返回可被前端直接访问的 URL。
+// 落盘位置由存储驱动决定（本地磁盘 / 对象存储）
 func (s *AdoptService) UploadAdoptPhoto(file io.Reader, originalExt string) (string, error) {
 	ext := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(originalExt, ".")))
 	switch ext {
@@ -557,37 +553,12 @@ func (s *AdoptService) UploadAdoptPhoto(file io.Reader, originalExt string) (str
 		return "", errors.New("仅支持 jpg/jpeg/png/gif/webp/bmp 格式的图片")
 	}
 
-	uploadDir := filepath.Join("public", "uploads", "adopt")
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建上传目录失败: %w", err)
-	}
-
-	randBytes := make([]byte, 16)
-	if _, err := rand.Read(randBytes); err != nil {
-		return "", fmt.Errorf("生成随机文件名失败: %w", err)
-	}
-	fileName := fmt.Sprintf("%d_%s.%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes), ext)
-	fullPath := filepath.Join(uploadDir, fileName)
-
-	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("保存文件失败: %w", err)
-	}
-	defer f.Close()
-
-	maxSize := utils.MaxPostImageBytes
-	written, err := io.Copy(f, io.LimitReader(file, maxSize+1))
-	if err != nil {
-		_ = os.Remove(fullPath)
-		return "", fmt.Errorf("保存图片数据失败: %w", err)
-	}
-	if written > maxSize {
-		_ = os.Remove(fullPath)
-		return "", errors.New("图片大小不得超过 5MB")
-	}
-
-	urlPath := "/uploads/adopt/" + fileName
-	return urlPath, nil
+	return utils.CurrentStorage().Save(file, utils.SaveOptions{
+		Category: utils.CategoryAdopt,
+		Ext:      ext,
+		MaxSize:  utils.MaxPostImageBytes,
+		Kind:     "图片",
+	})
 }
 
 // convertToAdoptInfo 转换领养信息模型为响应类型

@@ -6,7 +6,7 @@ import (
 
 type Statistics struct {
 	ID               uint      `gorm:"primaryKey" json:"id"`
-	StatDate         time.Time `gorm:"uniqueIndex;type:date;not null" json:"statDate"`
+	StatDate         time.Time `gorm:"uniqueIndex:idx_daily_stats_stat_date;type:date;not null" json:"statDate"`
 	UserCount        int       `gorm:"default:0" json:"userCount"`
 	NewUserCount     int       `gorm:"default:0" json:"newUserCount"`
 	PostCount        int       `gorm:"default:0" json:"postCount"`

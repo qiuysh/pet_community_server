@@ -4,9 +4,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"strings"
+	"sync"
+
+	"pet-community/config"
 	"pet-community/types"
 	"pet-community/utils"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,6 +41,34 @@ func generateCSRFToken() string {
 	return hex.EncodeToString(buf)
 }
 
+// 静态上传目录前缀（CSRF 豁免），来自 storage.local.base_url（默认 /api/v1/uploads）
+var (
+	uploadPrefixMu sync.RWMutex
+	uploadPrefix   = config.DefaultUploadBaseURL + "/"
+)
+
+// SetUploadPrefix 设置上传文件的对外访问前缀（启动阶段由 storage.local.base_url 注入）
+func SetUploadPrefix(prefix string) {
+	p := strings.TrimSpace(prefix)
+	if p == "" {
+		return
+	}
+	if !strings.HasSuffix(p, "/") {
+		p += "/"
+	}
+	uploadPrefixMu.Lock()
+	uploadPrefix = p
+	uploadPrefixMu.Unlock()
+}
+
+// isUploadPath 判断是否为静态上传资源访问（豁免 CSRF）
+func isUploadPath(path string) bool {
+	uploadPrefixMu.RLock()
+	prefix := uploadPrefix
+	uploadPrefixMu.RUnlock()
+	return strings.HasPrefix(path, prefix)
+}
+
 func csrfExemptPath(path string) bool {
 	switch path {
 	case "/api/v1/csrf-token",
@@ -64,7 +95,7 @@ func CSRFMiddleware() gin.HandlerFunc {
 			return
 		}
 		path := ctx.Request.URL.Path
-		if csrfExemptPath(path) || strings.HasPrefix(path, "/uploads/") || path == "/ws" {
+		if csrfExemptPath(path) || isUploadPath(path) || path == "/ws" {
 			ctx.Next()
 			return
 		}

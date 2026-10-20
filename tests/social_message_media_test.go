@@ -27,12 +27,12 @@ func TestMessageServiceSendMediaMessage(t *testing.T) {
 
 	t.Run("image message", func(t *testing.T) {
 		msg, err := srv.SendMessageWithMedia(
-			1, 2, "", model.MessageTypeImage, service.MessageImageURLPrefix+"a.jpg", 0,
+			1, 2, "", model.MessageTypeImage, service.MessageImageURLPrefix()+"a.jpg", 0,
 		)
 		if err != nil {
 			t.Fatalf("send image failed: %v", err)
 		}
-		if msg.MediaURL != service.MessageImageURLPrefix+"a.jpg" {
+		if msg.MediaURL != service.MessageImageURLPrefix()+"a.jpg" {
 			t.Errorf("unexpected media url: %s", msg.MediaURL)
 		}
 		if msg.Content != "[图片]" {
@@ -45,7 +45,7 @@ func TestMessageServiceSendMediaMessage(t *testing.T) {
 
 	t.Run("voice message", func(t *testing.T) {
 		msg, err := srv.SendMessageWithMedia(
-			2, 1, "", model.MessageTypeVoice, service.MessageVoiceURLPrefix+"a.webm", 5,
+			2, 1, "", model.MessageTypeVoice, service.MessageVoiceURLPrefix()+"a.webm", 5,
 		)
 		if err != nil {
 			t.Fatalf("send voice failed: %v", err)
@@ -61,7 +61,7 @@ func TestMessageServiceSendMediaMessage(t *testing.T) {
 	t.Run("voice duration out of range", func(t *testing.T) {
 		for _, duration := range []int{0, 61} {
 			if _, err := srv.SendMessageWithMedia(
-				1, 2, "", model.MessageTypeVoice, service.MessageVoiceURLPrefix+"a.webm", duration,
+				1, 2, "", model.MessageTypeVoice, service.MessageVoiceURLPrefix()+"a.webm", duration,
 			); err == nil {
 				t.Errorf("expected error for duration %d", duration)
 			}
@@ -76,11 +76,11 @@ func TestMessageServiceSendMediaMessage(t *testing.T) {
 
 	t.Run("reject path traversal media url", func(t *testing.T) {
 		badURLs := []string{
-			service.MessageImageURLPrefix + "../avatar/x.jpg",
-			service.MessageImageURLPrefix + "..%2Favatar/x.jpg",
-			"/uploads/messages/image/../../avatar/x.jpg",
-			service.MessageImageURLPrefix + "a/b.jpg",
-			service.MessageImageURLPrefix + "a.jpg?x=1",
+			service.MessageImageURLPrefix() + "../avatar/x.jpg",
+			service.MessageImageURLPrefix() + "..%2Favatar/x.jpg",
+			"/api/v1/uploads/messages/image/../../avatar/x.jpg",
+			service.MessageImageURLPrefix() + "a/b.jpg",
+			service.MessageImageURLPrefix() + "a.jpg?x=1",
 			"https://evil.example/a.jpg",
 		}
 		for _, url := range badURLs {
@@ -93,7 +93,7 @@ func TestMessageServiceSendMediaMessage(t *testing.T) {
 	t.Run("reject oversized media content", func(t *testing.T) {
 		long := strings.Repeat("字", service.MaxMessageContentRunes+1)
 		if _, err := srv.SendMessageWithMedia(
-			1, 2, long, model.MessageTypeImage, service.MessageImageURLPrefix+"a.jpg", 0,
+			1, 2, long, model.MessageTypeImage, service.MessageImageURLPrefix()+"a.jpg", 0,
 		); err == nil {
 			t.Error("expected error for content over 500 runes")
 		}
@@ -107,12 +107,19 @@ func TestMessageServiceSendMediaMessage(t *testing.T) {
 }
 
 func TestValidateMessageMediaURL(t *testing.T) {
-	if err := service.ValidateMessageMediaURL(service.MessageImageURLPrefix+"ok.jpg", service.MessageImageURLPrefix); err != nil {
+	if err := service.ValidateMessageMediaURL(service.MessageImageURLPrefix()+"ok.jpg", service.MessageImageCategory); err != nil {
 		t.Fatalf("valid url rejected: %v", err)
 	}
-	if err := service.ValidateMessageMediaURL(service.MessageImageURLPrefix+"../x.jpg", service.MessageImageURLPrefix); err == nil {
+	if err := service.ValidateMessageMediaURL(service.MessageImageURLPrefix()+"../x.jpg", service.MessageImageCategory); err == nil {
 		t.Fatal("traversal url should be rejected")
 	}
+
+	t.Run("url outside configured prefix rejected", func(t *testing.T) {
+		stale := "/uploads/messages/image/old.jpg"
+		if err := service.ValidateMessageMediaURL(stale, service.MessageImageCategory); err == nil {
+			t.Fatal("stale prefix url should be rejected")
+		}
+	})
 }
 
 func TestMessageServiceSearchMessages(t *testing.T) {

@@ -431,8 +431,8 @@ CREATE TABLE IF NOT EXISTS notification_settings (
     system_notify TINYINT DEFAULT 1 COMMENT '系统通知（0-关闭，1-开启）',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    INDEX idx_notification_settings_user_id (user_id),
-    UNIQUE KEY uk_notification_settings_user_id (user_id),
+    -- 唯一索引名与 model.NotificationSettings uniqueIndex 对齐，勿再额外建同名非唯一 INDEX
+    UNIQUE KEY idx_notification_settings_user_id (user_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='通知设置表';
 
@@ -506,8 +506,8 @@ CREATE TABLE IF NOT EXISTS user_levels (
     total_points INT DEFAULT 0 COMMENT '累计积分',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    INDEX idx_user_levels_user_id (user_id),
-    UNIQUE KEY uk_user_levels_user_id (user_id),
+    -- 唯一索引名与 model.UserLevel uniqueIndex 对齐，勿再额外建同名非唯一 INDEX
+    UNIQUE KEY idx_user_levels_user_id (user_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户等级表';
 
@@ -1084,8 +1084,8 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     active_user_count INT DEFAULT 0 COMMENT '活跃用户数',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    INDEX idx_daily_stats_stat_date (stat_date),
-    UNIQUE KEY uk_daily_stats_date (stat_date)
+    -- 唯一索引名与 model.Statistics uniqueIndex 对齐，勿再额外建同名非唯一 INDEX
+    UNIQUE KEY idx_daily_stats_stat_date (stat_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='每日统计表';
 
 -- ========================================

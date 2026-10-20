@@ -1,19 +1,14 @@
 package service
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
-	"os"
-	"path/filepath"
+	"strings"
+
 	"pet-community/model"
 	"pet-community/repository"
 	"pet-community/types"
 	"pet-community/utils"
-	"strings"
-	"time"
 )
 
 type PetService struct {
@@ -206,6 +201,7 @@ func (s *PetService) GetBreeds(petType int) ([]types.PetBreedInfo, error) {
 }
 
 // UploadAvatar 上传宠物头像（≤2MB），返回可访问 URL
+// 落盘位置由存储驱动决定（本地磁盘 / 对象存储）
 func (s *PetService) UploadAvatar(file io.Reader, originalExt string) (string, error) {
 	ext := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(originalExt, ".")))
 	switch ext {
@@ -214,39 +210,15 @@ func (s *PetService) UploadAvatar(file io.Reader, originalExt string) (string, e
 		return "", errors.New("仅支持 jpg/jpeg/png/webp 格式的头像")
 	}
 
-	uploadDir := filepath.Join("public", "uploads", "pet-avatar")
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建上传目录失败: %w", err)
-	}
-
-	randBytes := make([]byte, 16)
-	if _, err := rand.Read(randBytes); err != nil {
-		return "", fmt.Errorf("生成随机文件名失败: %w", err)
-	}
-	fileName := fmt.Sprintf("%d_%s.%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes), ext)
-	fullPath := filepath.Join(uploadDir, fileName)
-
-	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("保存文件失败: %w", err)
-	}
-	defer f.Close()
-
-	maxSize := utils.MaxAvatarBytes
-	written, err := io.Copy(f, io.LimitReader(file, maxSize+1))
-	if err != nil {
-		_ = os.Remove(fullPath)
-		return "", fmt.Errorf("保存图片数据失败: %w", err)
-	}
-	if written > maxSize {
-		_ = os.Remove(fullPath)
-		return "", errors.New("头像大小不得超过 2MB")
-	}
-
-	return "/uploads/pet-avatar/" + fileName, nil
+	return utils.CurrentStorage().Save(file, utils.SaveOptions{
+		Category: utils.CategoryPetAvatar,
+		Ext:      ext,
+		MaxSize:  utils.MaxAvatarBytes,
+		Kind:     "头像",
+	})
 }
 
-// UploadAlbumPhoto 上传宠物相册图片（本地保存，返回可访问 URL）
+// UploadAlbumPhoto 上传宠物相册图片（≤5MB），返回可访问 URL
 func (s *PetService) UploadAlbumPhoto(file io.Reader, originalExt string) (string, error) {
 	ext := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(originalExt, ".")))
 	switch ext {
@@ -255,36 +227,12 @@ func (s *PetService) UploadAlbumPhoto(file io.Reader, originalExt string) (strin
 		return "", errors.New("仅支持 jpg/jpeg/png/gif/webp/bmp 格式的图片")
 	}
 
-	uploadDir := filepath.Join("public", "uploads", "pet-album")
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建上传目录失败: %w", err)
-	}
-
-	randBytes := make([]byte, 16)
-	if _, err := rand.Read(randBytes); err != nil {
-		return "", fmt.Errorf("生成随机文件名失败: %w", err)
-	}
-	fileName := fmt.Sprintf("%d_%s.%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes), ext)
-	fullPath := filepath.Join(uploadDir, fileName)
-
-	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("保存文件失败: %w", err)
-	}
-	defer f.Close()
-
-	maxSize := utils.MaxPostImageBytes
-	written, err := io.Copy(f, io.LimitReader(file, maxSize+1))
-	if err != nil {
-		_ = os.Remove(fullPath)
-		return "", fmt.Errorf("保存图片数据失败: %w", err)
-	}
-	if written > maxSize {
-		_ = os.Remove(fullPath)
-		return "", errors.New("图片大小不得超过 5MB")
-	}
-
-	return "/uploads/pet-album/" + fileName, nil
+	return utils.CurrentStorage().Save(file, utils.SaveOptions{
+		Category: utils.CategoryPetAlbum,
+		Ext:      ext,
+		MaxSize:  utils.MaxPostImageBytes,
+		Kind:     "图片",
+	})
 }
 
 // UploadAlbumVideo 上传宠物相册视频（MP4，≤50MB）
@@ -294,36 +242,12 @@ func (s *PetService) UploadAlbumVideo(file io.Reader, originalExt string) (strin
 		return "", errors.New("相册视频仅支持 MP4 格式")
 	}
 
-	uploadDir := filepath.Join("public", "uploads", "pet-album")
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建上传目录失败: %w", err)
-	}
-
-	randBytes := make([]byte, 16)
-	if _, err := rand.Read(randBytes); err != nil {
-		return "", fmt.Errorf("生成随机文件名失败: %w", err)
-	}
-	fileName := fmt.Sprintf("%d_%s.%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes), ext)
-	fullPath := filepath.Join(uploadDir, fileName)
-
-	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("保存文件失败: %w", err)
-	}
-	defer f.Close()
-
-	maxSize := utils.MaxVideoBytes
-	written, err := io.Copy(f, io.LimitReader(file, maxSize+1))
-	if err != nil {
-		_ = os.Remove(fullPath)
-		return "", fmt.Errorf("保存视频数据失败: %w", err)
-	}
-	if written > maxSize {
-		_ = os.Remove(fullPath)
-		return "", errors.New("视频大小不得超过 50MB")
-	}
-
-	return "/uploads/pet-album/" + fileName, nil
+	return utils.CurrentStorage().Save(file, utils.SaveOptions{
+		Category: utils.CategoryPetAlbum,
+		Ext:      ext,
+		MaxSize:  utils.MaxVideoBytes,
+		Kind:     "视频",
+	})
 }
 
 func (s *PetService) AddAlbumPhoto(userID, petID uint, req *types.PetAlbumCreateRequest) (*types.PetAlbumInfo, error) {
@@ -565,36 +489,12 @@ func (s *PetService) UploadLostPetPhoto(file io.Reader, originalExt string) (str
 		return "", errors.New("仅支持 jpg/jpeg/png/gif/webp/bmp 格式的图片")
 	}
 
-	uploadDir := filepath.Join("public", "uploads", "lost-pet")
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建上传目录失败: %w", err)
-	}
-
-	randBytes := make([]byte, 16)
-	if _, err := rand.Read(randBytes); err != nil {
-		return "", fmt.Errorf("生成随机文件名失败: %w", err)
-	}
-	fileName := fmt.Sprintf("%d_%s.%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes), ext)
-	fullPath := filepath.Join(uploadDir, fileName)
-
-	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("保存文件失败: %w", err)
-	}
-	defer f.Close()
-
-	maxSize := utils.MaxPostImageBytes
-	written, err := io.Copy(f, io.LimitReader(file, maxSize+1))
-	if err != nil {
-		_ = os.Remove(fullPath)
-		return "", fmt.Errorf("保存图片数据失败: %w", err)
-	}
-	if written > maxSize {
-		_ = os.Remove(fullPath)
-		return "", errors.New("图片大小不得超过 5MB")
-	}
-
-	return "/uploads/lost-pet/" + fileName, nil
+	return utils.CurrentStorage().Save(file, utils.SaveOptions{
+		Category: utils.CategoryLostPet,
+		Ext:      ext,
+		MaxSize:  utils.MaxPostImageBytes,
+		Kind:     "图片",
+	})
 }
 
 func (s *PetService) CreateLostPet(userID uint, req *types.LostPetCreateRequest) (*types.LostPetInfo, error) {

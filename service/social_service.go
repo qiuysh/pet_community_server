@@ -183,7 +183,7 @@ func (s *MessageService) SendMessageWithMedia(fromID, toID uint, content string,
 		mediaURL = ""
 		duration = 0
 	case model.MessageTypeImage:
-		if err := ValidateMessageMediaURL(mediaURL, MessageImageURLPrefix); err != nil {
+		if err := ValidateMessageMediaURL(mediaURL, MessageImageCategory); err != nil {
 			return nil, errors.New("图片地址无效")
 		}
 		duration = 0
@@ -191,7 +191,7 @@ func (s *MessageService) SendMessageWithMedia(fromID, toID uint, content string,
 			content = "[图片]"
 		}
 	case model.MessageTypeVoice:
-		if err := ValidateMessageMediaURL(mediaURL, MessageVoiceURLPrefix); err != nil {
+		if err := ValidateMessageMediaURL(mediaURL, MessageVoiceCategory); err != nil {
 			return nil, errors.New("语音地址无效")
 		}
 		if err := utils.ValidateVoiceDuration(duration); err != nil {

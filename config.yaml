@@ -9,7 +9,7 @@ database:
   host: localhost
   port: 3306
   username: root
-  password: xxxx
+  password: 123456
   database: pet_community
 
 jwt:
@@ -19,7 +19,7 @@ redis:
   enabled: true
   host: 127.0.0.1
   port: 6379
-  password: xxxx
+  password: 558321
   db: 0
   pool_size: 10
 
@@ -36,3 +36,28 @@ scheduler:
   notification_cron: "0 * * * * *"
   scheduled_post_cron: "0 */5 * * * *"
   stats_startup_delay_sec: 5
+
+# 文件存储：业务层统一走存储抽象，切换 OSS 只改这里
+storage:
+  # driver: local（本地磁盘）| oss / s3（S3 兼容对象存储）
+  driver: local
+  local:
+    # 落盘根目录（相对进程工作目录，也可填绝对路径）
+    root: public/uploads
+    # 对外访问前缀，需与静态路由挂载路径一致；末段必须是 uploads（禁止 /api、/api/v1，以免 CSRF 豁免面过大）
+    base_url: /api/v1/uploads
+  oss:
+    # 端点不带协议：阿里云 OSS 如 oss-cn-hangzhou.aliyuncs.com，MinIO 如 127.0.0.1:9000
+    endpoint: ""
+    region: cn-hangzhou
+    bucket: ""
+    access_key_id: ""
+    access_key_secret: ""
+    # object key 统一前缀
+    key_prefix: uploads
+    # 对外访问域名（CDN / 自定义域名），留空按 endpoint + bucket 自动拼接。
+    # 返回的是公开 URL：桶需配置公共读或由 CDN 回源授权，否则前端会 403。
+    base_url: ""
+    use_ssl: true
+    # true=路径风格 https://endpoint/bucket/key（MinIO）；false=虚拟主机风格（阿里云 OSS / COS / S3）
+    path_style: false

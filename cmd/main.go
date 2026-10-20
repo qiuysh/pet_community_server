@@ -24,6 +24,13 @@ func main() {
 	config.InitRedis()
 	utils.InitRSA(2048)
 
+	// 初始化统一存储：本地磁盘 / 对象存储（OSS），由 storage.driver 决定
+	store, err := utils.InitStorage(&config.Cfg.Storage)
+	if err != nil {
+		log.Fatalf("init storage failed: %v", err)
+	}
+	log.Printf("storage driver=%s", store.Driver())
+
 	if err := config.DB.AutoMigrate(
 		&model.AdminUser{},
 		&model.AdminOperationLog{},
@@ -253,8 +260,9 @@ func main() {
 	frontAdController := controller.NewFrontAdController(adService)
 
 	r := gin.Default()
-	r.Static("/uploads", "./public/uploads")
+	mountUploadRoutes(r)
 
+	middleware.SetUploadPrefix(config.Cfg.Storage.Local.BaseURL)
 	middleware.SetLogService(logService)
 	r.Use(middleware.UserBehaviorLogMiddleware())
 	r.Use(middleware.CSRFMiddleware())
@@ -290,6 +298,16 @@ func main() {
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
+}
+
+// mountUploadRoutes 挂载上传文件的静态访问路由。
+// 仅本地驱动需要挂载（对象存储由 bucket 域名直接提供访问）；
+// 挂载路径取自 storage.local.base_url（默认 /api/v1/uploads），需与生成的 URL 前缀一致。
+func mountUploadRoutes(r *gin.Engine) {
+	if config.Cfg.Storage.Driver != config.StorageDriverLocal {
+		return
+	}
+	r.Static(config.Cfg.Storage.Local.BaseURL, config.Cfg.Storage.Local.Root)
 }
 
 func ensureDefaultAdmin() {

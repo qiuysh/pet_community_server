@@ -126,7 +126,7 @@ func (c *MessageController) SendMessage(ctx *gin.Context) {
 		req.Duration = 0
 
 	case model.MessageTypeImage:
-		if err := service.ValidateMessageMediaURL(mediaURL, service.MessageImageURLPrefix); err != nil {
+		if err := service.ValidateMessageMediaURL(mediaURL, service.MessageImageCategory); err != nil {
 			utils.RespondError(ctx, types.CodeParamError, "图片地址无效")
 			return
 		}
@@ -136,7 +136,7 @@ func (c *MessageController) SendMessage(ctx *gin.Context) {
 		}
 
 	case model.MessageTypeVoice:
-		if err := service.ValidateMessageMediaURL(mediaURL, service.MessageVoiceURLPrefix); err != nil {
+		if err := service.ValidateMessageMediaURL(mediaURL, service.MessageVoiceCategory); err != nil {
 			utils.RespondError(ctx, types.CodeParamError, "语音地址无效")
 			return
 		}

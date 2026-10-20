@@ -1,15 +1,11 @@
 package service
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	mathrand "math/rand"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -253,6 +249,7 @@ func (s *UserService) UpdateProfile(userID uint, req *types.UserProfileUpdateReq
 }
 
 // UploadAvatar 上传用户头像并写入资料（≤2MB）
+// 落盘位置由存储驱动决定（本地磁盘 / 对象存储），返回可直接访问的 URL
 func (s *UserService) UploadAvatar(userID uint, file io.Reader, originalExt string) (*types.UserInfo, error) {
 	ext := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(originalExt, ".")))
 	switch ext {
@@ -261,36 +258,16 @@ func (s *UserService) UploadAvatar(userID uint, file io.Reader, originalExt stri
 		return nil, errors.New("仅支持 jpg/jpeg/png/webp 格式的头像")
 	}
 
-	uploadDir := filepath.Join("public", "uploads", "avatar")
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		return nil, fmt.Errorf("创建上传目录失败: %w", err)
-	}
-
-	randBytes := make([]byte, 16)
-	if _, err := rand.Read(randBytes); err != nil {
-		return nil, fmt.Errorf("生成随机文件名失败: %w", err)
-	}
-	fileName := fmt.Sprintf("%d_%s.%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes), ext)
-	fullPath := filepath.Join(uploadDir, fileName)
-
-	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	urlPath, err := utils.CurrentStorage().Save(file, utils.SaveOptions{
+		Category: utils.CategoryUserAvatar,
+		Ext:      ext,
+		MaxSize:  utils.MaxAvatarBytes,
+		Kind:     "头像",
+	})
 	if err != nil {
-		return nil, fmt.Errorf("保存文件失败: %w", err)
-	}
-	defer f.Close()
-
-	maxSize := utils.MaxAvatarBytes
-	written, err := io.Copy(f, io.LimitReader(file, maxSize+1))
-	if err != nil {
-		_ = os.Remove(fullPath)
-		return nil, fmt.Errorf("保存图片数据失败: %w", err)
-	}
-	if written > maxSize {
-		_ = os.Remove(fullPath)
-		return nil, errors.New("头像大小不得超过 2MB")
+		return nil, err
 	}
 
-	urlPath := "/uploads/avatar/" + fileName
 	return s.UpdateProfile(userID, &types.UserProfileUpdateRequest{Avatar: urlPath})
 }
 

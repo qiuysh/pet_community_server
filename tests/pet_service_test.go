@@ -2,15 +2,18 @@ package tests
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"pet-community/config"
 	"pet-community/model"
 	"pet-community/repository"
 	"pet-community/service"
 	"pet-community/tests/testutil"
 	"pet-community/types"
+	"pet-community/utils"
 )
 
 func TestPetServiceCreatePet(t *testing.T) {
@@ -268,9 +271,28 @@ func TestPetServiceGetBreeds(t *testing.T) {
 	})
 }
 
+// useTempStorage 把存储指向临时目录，避免测试把文件写进仓库
+func useTempStorage(t *testing.T, prefix string) string {
+	t.Helper()
+	root := t.TempDir()
+	st, err := utils.NewStorage(&config.StorageConfig{
+		Driver: config.StorageDriverLocal,
+		Local:  config.LocalStorageConfig{Root: root, BaseURL: prefix},
+	})
+	if err != nil {
+		t.Fatalf("new storage: %v", err)
+	}
+	prev := utils.CurrentStorage()
+	utils.SetStorage(st)
+	t.Cleanup(func() { utils.SetStorage(prev) })
+	return root
+}
+
 func TestPetServiceUploadAlbumPhoto(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	srv := service.NewPetService(repository.NewPetRepository(db))
+	root := useTempStorage(t, "/api/v1/uploads")
+	wantPrefix := "/api/v1/uploads/" + utils.CategoryPetAlbum + "/"
 
 	t.Run("reject invalid ext", func(t *testing.T) {
 		_, err := srv.UploadAlbumPhoto(strings.NewReader("fake"), "exe")
@@ -284,16 +306,21 @@ func TestPetServiceUploadAlbumPhoto(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upload failed: %v", err)
 		}
-		if !strings.HasPrefix(url, "/uploads/pet-album/") {
+		if !strings.HasPrefix(url, wantPrefix) {
 			t.Fatalf("unexpected url: %s", url)
 		}
-		_ = os.Remove("public" + url)
+		objPath := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(url, "/api/v1/uploads/")))
+		if _, err := os.Stat(objPath); err != nil {
+			t.Fatalf("object not persisted: %v", err)
+		}
 	})
 }
 
 func TestPetServiceUploadAlbumVideo(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	srv := service.NewPetService(repository.NewPetRepository(db))
+	root := useTempStorage(t, "/api/v1/uploads")
+	wantPrefix := "/api/v1/uploads/" + utils.CategoryPetAlbum + "/"
 
 	t.Run("reject non-mp4", func(t *testing.T) {
 		_, err := srv.UploadAlbumVideo(strings.NewReader("fake"), "avi")
@@ -307,10 +334,13 @@ func TestPetServiceUploadAlbumVideo(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upload failed: %v", err)
 		}
-		if !strings.HasPrefix(url, "/uploads/pet-album/") {
+		if !strings.HasPrefix(url, wantPrefix) {
 			t.Fatalf("unexpected url: %s", url)
 		}
-		_ = os.Remove("public" + url)
+		objPath := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(url, "/api/v1/uploads/")))
+		if _, err := os.Stat(objPath); err != nil {
+			t.Fatalf("object not persisted: %v", err)
+		}
 	})
 }
 
