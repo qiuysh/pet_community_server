@@ -6,8 +6,9 @@ import (
 
 // Adopt 领养信息模型
 type Adopt struct {
-	ID              uint      `gorm:"primaryKey" json:"id"`
-	PetID           uint      `gorm:"default:0" json:"petId"`
+	ID uint `gorm:"primaryKey" json:"id"`
+	// PetID 关联宠物，允许为空（发布领养时可不绑定宠物档案），故用指针表达 NULL
+	PetID           *uint     `gorm:"default:null" json:"petId"`
 	UserID          uint      `gorm:"not null;index" json:"userId"`
 	PetName         string    `gorm:"size:50;not null" json:"petName"`
 	PetType         string    `gorm:"size:20;not null;index" json:"petType"`

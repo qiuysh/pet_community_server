@@ -38,6 +38,23 @@ func NewAdoptService(
 	}
 }
 
+// nullablePetID 把请求里的宠物ID转成可空指针，0 表示未绑定宠物（写库为 NULL）
+func nullablePetID(petID uint) *uint {
+	if petID == 0 {
+		return nil
+	}
+	id := petID
+	return &id
+}
+
+// petIDValue 取可空宠物ID的值，未绑定时返回 0
+func petIDValue(petID *uint) uint {
+	if petID == nil {
+		return 0
+	}
+	return *petID
+}
+
 // CreateAdopt 创建领养信息
 func (s *AdoptService) CreateAdopt(userID uint, req *types.AdoptCreateRequest) (*types.AdoptInfo, error) {
 	// 校验照片 URL，禁止占位符与未上传的本地预览 URL 入库
@@ -52,7 +69,7 @@ func (s *AdoptService) CreateAdopt(userID uint, req *types.AdoptCreateRequest) (
 	}
 
 	adopt := &model.Adopt{
-		PetID:           req.PetID,
+		PetID:           nullablePetID(req.PetID),
 		UserID:          userID,
 		PetName:         req.PetName,
 		PetType:         req.PetType,
@@ -517,6 +534,7 @@ func (s *AdoptService) GetAdoptionStats() (*types.AdoptionStats, error) {
 //   - "placeholder-url-N" 等前端占位符
 //   - "blob:..." 未上传的本地预览 URL
 //   - "file:..." / "data:..." 本地路径
+//
 // 允许：http://  https://  以及以 / 开头的相对路径（静态资源）
 func validatePhotos(photos []string) error {
 	for i, p := range photos {
@@ -587,7 +605,7 @@ func (s *AdoptService) convertToAdoptInfo(adopt *model.Adopt, viewerID uint) (*t
 
 	return &types.AdoptInfo{
 		ID:               adopt.ID,
-		PetID:            adopt.PetID,
+		PetID:            petIDValue(adopt.PetID),
 		UserID:           adopt.UserID,
 		UserNickname:     user.Nickname,
 		UserAvatar:       user.Avatar,

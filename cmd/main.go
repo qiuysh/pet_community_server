@@ -258,6 +258,7 @@ func main() {
 	adoptController := controller.NewAdoptController(adoptService)
 
 	frontAdController := controller.NewFrontAdController(adService)
+	siteController := controller.NewSiteController(adminConfigSvc)
 
 	r := gin.Default()
 	mountUploadRoutes(r)
@@ -292,6 +293,7 @@ func main() {
 	router.SetupActivityRoutes(apiV1, activityController)
 	router.SetupAdoptRoutes(apiV1, adoptController)
 	router.SetupAdRoutes(apiV1, frontAdController)
+	router.SetupSiteRoutes(apiV1, siteController)
 
 	addr := config.Cfg.Addr()
 	log.Printf("server listening on %s", addr)
