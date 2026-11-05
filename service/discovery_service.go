@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -721,6 +722,7 @@ func (s *DiscoveryService) GetTopicDetail(topicID, userID uint) (*types.TopicDet
 		Description:       topic.Description,
 		Cover:             topic.Cover,
 		PostsCount:        topic.PostsCount,
+		SharesCount:       topic.SharesCount,
 		Status:            topic.Status,
 		ParticipantsCount: int(participantsCount),
 		IsParticipated:    isParticipated,
@@ -784,7 +786,8 @@ func (s *DiscoveryService) ParticipateTopic(topicID, userID uint) error {
 	})
 }
 
-// ShareTopic 生成话题分享链接（前端可据此复制/出二维码）
+// ShareTopic 生成话题分享链接，并在指定平台时累加分享数
+// 前端流程：打开分享面板时只生成链接（platform 为空），用户选定平台后才带 platform 调用
 func (s *DiscoveryService) ShareTopic(topicID uint, platform string) (*types.TopicShareResponse, error) {
 	topic, err := s.topicRepo.GetByID(topicID)
 	if err != nil {
@@ -793,7 +796,14 @@ func (s *DiscoveryService) ShareTopic(topicID uint, platform string) (*types.Top
 	if topic.Status != 1 {
 		return nil, errors.New("话题不存在")
 	}
-	_ = platform
+
+	// 计数为尽力而为：shares_count 列缺失（未执行增量脚本）时不影响链接生成
+	if platform != "" {
+		if err := s.topicRepo.IncrementSharesCount(topic.ID, 1); err != nil {
+			log.Printf("increment topic shares failed: topic=%d platform=%s err=%v", topic.ID, platform, err)
+		}
+	}
+
 	return &types.TopicShareResponse{
 		ShareURL: fmt.Sprintf("/topics/%d", topic.ID),
 	}, nil

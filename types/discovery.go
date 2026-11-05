@@ -69,6 +69,7 @@ type TopicDetailInfo struct {
 	Description       string `json:"description"`
 	Cover             string `json:"cover"`
 	PostsCount        int    `json:"postsCount"`
+	SharesCount       int    `json:"sharesCount"`
 	Status            int    `json:"status"`
 	ParticipantsCount int    `json:"participantsCount"`
 	IsParticipated    bool   `json:"isParticipated"`

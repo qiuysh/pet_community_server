@@ -594,6 +594,11 @@ func (r *TopicRepository) IncrementPostsCount(id uint, delta int) error {
 	return r.db.Model(&model.Topic{}).Where("id = ?", id).UpdateColumn("posts_count", gorm.Expr("posts_count + ?", delta)).Error
 }
 
+// IncrementSharesCount 累加话题分享数
+func (r *TopicRepository) IncrementSharesCount(id uint, delta int) error {
+	return r.db.Model(&model.Topic{}).Where("id = ?", id).UpdateColumn("shares_count", gorm.Expr("shares_count + ?", delta)).Error
+}
+
 func (r *TopicRepository) GetByIDs(ids []uint) ([]model.Topic, error) {
 	var topics []model.Topic
 	if err := r.db.Where("id IN ? AND status = 1", ids).Find(&topics).Error; err != nil {

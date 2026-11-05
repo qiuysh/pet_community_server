@@ -204,6 +204,7 @@ CREATE TABLE IF NOT EXISTS topics (
     description VARCHAR(200) COMMENT '话题描述',
     cover VARCHAR(255) COMMENT '话题封面',
     posts_count INT DEFAULT 0 COMMENT '讨论数',
+    shares_count INT DEFAULT 0 COMMENT '分享数（用户选择分享平台后累加）',
     followers_count INT DEFAULT 0 COMMENT '关注数',
     sort_order INT DEFAULT 0 COMMENT '排序顺序',
     status TINYINT DEFAULT 1 COMMENT '状态（0-待审核，1-正常，2-关闭）',

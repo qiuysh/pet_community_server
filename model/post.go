@@ -116,6 +116,7 @@ type Topic struct {
 	CategoryID  uint      `gorm:"index;default:0" json:"categoryId"` // 话题分类（TopicCategory）
 	CreatorID   uint      `gorm:"index;default:0" json:"creatorId"` // 创建者；0 表示系统/运营
 	PostsCount  int       `gorm:"default:0" json:"postsCount"`
+	SharesCount int       `gorm:"default:0" json:"sharesCount"` // 选择平台后累加，与帖子分享数同口径
 	Status      int       `gorm:"default:0;index" json:"status"` // 0待审核 1已通过（Create 须显式写 Status，避免零值被 default 覆盖）
 	CreatedAt   time.Time `gorm:"autoCreateTime" json:"createdAt"`
 }
