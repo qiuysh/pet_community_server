@@ -22,6 +22,8 @@ const (
 	CategoryAdopt      = "adopt"
 	CategoryMsgImage   = "messages/image"
 	CategoryMsgVoice   = "messages/voice"
+	// CategorySubmission 活动作品图片/视频（无专属上传端点的场景）
+	CategorySubmission = "activity-submission"
 )
 
 // SaveOptions 写入对象时的约束
