@@ -117,15 +117,6 @@ func parseInt64(s string) (int64, error) {
 	return result, nil
 }
 
-// GenerateQRCodeImageBase64 生成二维码图片的Base64编码（模拟）
-// 注意：实际实现需要使用二维码生成库，这里仅返回模拟数据
-func (s *QRCodeService) GenerateQRCodeImageBase64(qrCode string) string {
-	// 实际项目中应该使用 github.com/skip2/go-qrcode 等库生成真正的二维码图片
-	// 这里仅返回一个模拟的base64字符串
-	// 在前端，可以使用第三方库（如 qrcode.react）根据 qrCode 内容生成二维码
-	return ""
-}
-
 // QRCodeData 二维码数据（用于前端展示）
 type QRCodeData struct {
 	Content string `json:"content"` // 二维码内容

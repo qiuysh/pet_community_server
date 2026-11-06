@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"pet-community/model"
 	"pet-community/repository"
 	"pet-community/types"
+	"pet-community/utils"
 
 	"gorm.io/gorm"
 )
@@ -459,21 +461,43 @@ type SubmissionService struct {
 	registrationRepo *repository.RegistrationRepository
 	userRepo         *repository.UserRepository
 	voteRepo         *repository.VoteRepository
+	notificationRepo *repository.NotificationRepository
 }
 
-func NewSubmissionService(
-	submissionRepo *repository.SubmissionRepository,
-	activityRepo *repository.ActivityRepository,
-	registrationRepo *repository.RegistrationRepository,
-	userRepo *repository.UserRepository,
-	voteRepo *repository.VoteRepository,
-) *SubmissionService {
+// SubmissionServiceDeps SubmissionService 的依赖集合。
+// 依赖项超过 3 个，按项目规范收拢为结构体入参。
+type SubmissionServiceDeps struct {
+	SubmissionRepo   *repository.SubmissionRepository
+	ActivityRepo     *repository.ActivityRepository
+	RegistrationRepo *repository.RegistrationRepository
+	UserRepo         *repository.UserRepository
+	VoteRepo         *repository.VoteRepository
+	NotificationRepo *repository.NotificationRepository
+}
+
+// NewSubmissionService 构造 SubmissionService
+func NewSubmissionService(deps SubmissionServiceDeps) *SubmissionService {
 	return &SubmissionService{
-		submissionRepo:   submissionRepo,
-		activityRepo:     activityRepo,
-		registrationRepo: registrationRepo,
-		userRepo:         userRepo,
-		voteRepo:         voteRepo,
+		submissionRepo:   deps.SubmissionRepo,
+		activityRepo:     deps.ActivityRepo,
+		registrationRepo: deps.RegistrationRepo,
+		userRepo:         deps.UserRepo,
+		voteRepo:         deps.VoteRepo,
+		notificationRepo: deps.NotificationRepo,
+	}
+}
+
+// awardLevelLabel 奖项代码转中文文案
+func awardLevelLabel(level string) string {
+	switch level {
+	case "first":
+		return "一等奖"
+	case "second":
+		return "二等奖"
+	case "third":
+		return "三等奖"
+	default:
+		return "奖项"
 	}
 }
 
@@ -807,12 +831,10 @@ func (s *SubmissionService) PublishAwardResult(activityID uint) (*types.PublishA
 	}
 
 	awardedSubmissions := make([]model.Submission, 0)
-	notifiedUsers := make([]uint, 0)
 
 	for _, submission := range submissions {
 		if submission.IsAwarded {
 			awardedSubmissions = append(awardedSubmissions, submission)
-			notifiedUsers = append(notifiedUsers, submission.UserID)
 		}
 	}
 
@@ -829,12 +851,34 @@ func (s *SubmissionService) PublishAwardResult(activityID uint) (*types.PublishA
 		return nil, err
 	}
 
-	// 这里可以添加发送通知的逻辑（通知获奖用户）
-	// 暂时返回成功响应
+	// 通知获奖用户：单个失败不影响其他人，也不回滚已发布的结果
+	notifiedUsers := make([]uint, 0, len(awardedSubmissions))
+	failed := 0
+	for _, submission := range awardedSubmissions {
+		notification := &model.UserNotification{
+			UserID:      submission.UserID,
+			Type:        "activity",
+			Title:       "恭喜获奖",
+			Content:     fmt.Sprintf("您在活动《%s》中的作品获得%s，快去看看吧", activity.Title, awardLevelLabel(submission.AwardLevel)),
+			TriggerType: "activity",
+			TriggerID:   activity.ID,
+		}
+		if err := s.notificationRepo.Create(notification); err != nil {
+			failed++
+			utils.LogError(err, "SubmissionService.PublishAwardResult.notify")
+			continue
+		}
+		notifiedUsers = append(notifiedUsers, submission.UserID)
+	}
+
+	message := "评选结果已发布"
+	if failed > 0 {
+		message = fmt.Sprintf("评选结果已发布，%d 位获奖者通知发送失败", failed)
+	}
 
 	return &types.PublishAwardResponse{
 		Success:       true,
-		Message:       "评选结果已发布",
+		Message:       message,
 		NotifiedUsers: notifiedUsers,
 	}, nil
 }

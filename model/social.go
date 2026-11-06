@@ -87,7 +87,7 @@ func (PointsRecord) TableName() string {
 
 type PointsRule struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	Type        string    `gorm:"size:20;unique" json:"type"`
+	Type        string    `gorm:"size:20;uniqueIndex:uk_points_rules_type" json:"type"`
 	Points      int       `json:"points"`
 	Description string    `gorm:"size:100" json:"description"`
 	IsActive    int       `gorm:"default:1" json:"isActive"`

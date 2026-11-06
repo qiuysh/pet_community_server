@@ -24,6 +24,17 @@ type WebSocketService struct {
 	messageCh chan *MessagePayload
 }
 
+// OnlinePresence 查询用户当前是否保持着 WebSocket 连接（连接态，而非活跃态）。
+type OnlinePresence interface {
+	IsOnline(userID uint) bool
+}
+
+// IsOnline 是否持有该用户的 WebSocket 连接。
+func (ws *WebSocketService) IsOnline(userID uint) bool {
+	_, ok := ws.clients.Load(userID)
+	return ok
+}
+
 type MessagePayload struct {
 	ID       uint   `json:"id"`
 	ToID     uint   `json:"toId"`

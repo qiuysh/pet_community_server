@@ -326,7 +326,11 @@ func (s *UserService) SendCode(account, codeType, ip string) (expiresIn int, deb
 		if err := cache.StoreCode(account, codeType, code, ip); err != nil {
 			return 0, "", err
 		}
-		fmt.Printf("[SendCode] account=%s type=%s code=%s (redis)\n", account, codeType, code)
+		fmt.Printf("[SendCode] account=%s type=%s (redis)", account, codeType)
+		if config.IsDev() {
+			fmt.Printf(" code=%s", code)
+		}
+		fmt.Println()
 		return 300, code, nil
 	}
 
@@ -353,7 +357,11 @@ func (s *UserService) SendCode(account, codeType, ip string) (expiresIn int, deb
 		return 0, "", err
 	}
 
-	fmt.Printf("[SendCode] account=%s type=%s code=%s\n", account, codeType, code)
+	fmt.Printf("[SendCode] account=%s type=%s", account, codeType)
+	if config.IsDev() {
+		fmt.Printf(" code=%s", code)
+	}
+	fmt.Println()
 	return 300, code, nil
 }
 
@@ -384,11 +392,17 @@ func (s *UserService) VerifyCode(account, codeType, code string) (bool, error) {
 
 func (s *UserService) Logout(userID uint, deviceID string) error {
 	if deviceID != "" {
-		_ = s.userRepo.RemoveDevice(userID, deviceID)
+		// 单设备登出：设备记录删不掉则该 Token 仍然有效，必须把错误抛给调用方
+		if err := s.userRepo.RemoveDevice(userID, deviceID); err != nil {
+			return err
+		}
 		cache.RemoveCachedDevice(userID, deviceID)
 		return nil
 	}
-	_ = s.userRepo.RemoveAllDevices(userID)
+	// 全端登出：递增 Token 版本已能作废旧 Token，清设备失败只影响设备列表展示，记日志即可
+	if err := s.userRepo.RemoveAllDevices(userID); err != nil {
+		utils.LogError(err, "UserService.Logout.removeDevices")
+	}
 	err := s.userRepo.IncrementTokenVersion(userID)
 	cache.InvalidateUserSession(userID)
 	return err
@@ -405,10 +419,15 @@ func (s *UserService) RemoveDeviceByID(userID uint, deviceID string) error {
 
 // InvalidateUserSessions 封禁/强制全端下线：递增 Token 版本并清设备
 func (s *UserService) InvalidateUserSessions(userID uint) error {
-	_ = s.userRepo.RemoveAllDevices(userID)
-	err := s.userRepo.IncrementTokenVersion(userID)
+	// 先递增版本（决定 Token 是否失效），再清设备；两者都不能静默失败
+	if err := s.userRepo.IncrementTokenVersion(userID); err != nil {
+		return err
+	}
+	if err := s.userRepo.RemoveAllDevices(userID); err != nil {
+		return err
+	}
 	cache.InvalidateUserSession(userID)
-	return err
+	return nil
 }
 
 func (s *UserService) GetDevices(userID uint) ([]types.DeviceInfo, error) {
@@ -469,15 +488,21 @@ func (s *UserService) AdminUpdateUserStatus(userID uint, status int) error {
 		return err
 	}
 	if status != 1 {
-		_ = s.InvalidateUserSessions(userID)
+		if err := s.InvalidateUserSessions(userID); err != nil {
+			return fmt.Errorf("用户状态已更新，但强制下线失败: %w", err)
+		}
 	}
 	return nil
 }
 
 // ThirdPartyLogin 第三方登录
 func (s *UserService) ThirdPartyLogin(req *types.ThirdPartyLoginRequest, ip, userAgent string) (*types.ThirdPartyLoginResponse, error) {
-	// 模拟通过code获取openID（实际应调用微信/微博/QQ接口）
-	openID := fmt.Sprintf("%s_%s", req.Platform, req.Code)
+	// openID 只能由平台 OAuth 接口返回；未配置凭据的平台直接拒绝
+	identity, err := resolveThirdPartyIdentity(req.Platform, req.Code)
+	if err != nil {
+		return nil, err
+	}
+	openID := identity.OpenID
 
 	// 查找是否已有绑定记录
 	thirdAccount, err := s.userRepo.GetThirdAccount(req.Platform, openID)
@@ -512,9 +537,13 @@ func (s *UserService) ThirdPartyLogin(req *types.ThirdPartyLoginRequest, ip, use
 	}
 
 	// 新用户，创建账号
-	nickname := generateNickname()
+	nickname := identity.Nickname
+	if strings.TrimSpace(nickname) == "" {
+		nickname = generateNickname()
+	}
 	user := &model.User{
 		Nickname:        nickname,
+		Avatar:          identity.Avatar,
 		Status:          1,
 		PrivacySettings: "{}",
 	}
@@ -528,6 +557,7 @@ func (s *UserService) ThirdPartyLogin(req *types.ThirdPartyLoginRequest, ip, use
 		Platform: req.Platform,
 		OpenID:   openID,
 		Nickname: nickname,
+		Avatar:   identity.Avatar,
 	}
 	if err := s.userRepo.CreateThirdAccount(thirdAccount); err != nil {
 		return nil, err
@@ -571,7 +601,7 @@ func (s *UserService) ListThirdPartyAccounts(userID uint) ([]types.ThirdPartyAcc
 	return result, nil
 }
 
-// BindThirdPartyAccount 已登录用户绑定第三方（演示：用 code 生成 openID）
+// BindThirdPartyAccount 已登录用户绑定第三方账号
 func (s *UserService) BindThirdPartyAccount(userID uint, req *types.BindThirdPartyAccountRequest) error {
 	user, err := s.userRepo.GetByID(userID)
 	if err != nil {
@@ -588,7 +618,12 @@ func (s *UserService) BindThirdPartyAccount(userID uint, req *types.BindThirdPar
 		}
 	}
 
-	openID := fmt.Sprintf("%s_%s", req.Platform, req.Code)
+	identity, err := resolveThirdPartyIdentity(req.Platform, req.Code)
+	if err != nil {
+		return err
+	}
+	openID := identity.OpenID
+
 	if other, err := s.userRepo.GetThirdAccount(req.Platform, openID); err == nil && other != nil {
 		if other.UserID != userID {
 			return errors.New("该第三方账号已绑定其他用户")
@@ -903,7 +938,10 @@ func recordUserLoginFailure(s *UserService, user *model.User) error {
 			until := time.Now().Add(30 * time.Minute)
 			user.LockedUntil = &until
 			user.FailedLoginCount = 0
-			_ = s.userRepo.Update(user)
+			// Redis 已锁定，落库失败只影响重启后的锁定状态，记日志便于排查
+			if uerr := s.userRepo.Update(user); uerr != nil {
+				utils.LogError(uerr, "UserService.recordLoginFailure.persistLock")
+			}
 		}
 		return err
 	}
@@ -920,7 +958,10 @@ func clearUserLoginFailure(s *UserService, user *model.User) {
 	cache.ClearLoginFailures(cache.LoginScopeUser, user.ID)
 	user.FailedLoginCount = 0
 	user.LockedUntil = nil
-	_ = s.userRepo.Update(user)
+	// 清零失败不阻断登录：DB 残留计数最多让用户多试几次，记日志追踪
+	if err := s.userRepo.Update(user); err != nil {
+		utils.LogError(err, "UserService.clearLoginFailure")
+	}
 }
 
 func RefreshUserToken(refreshTokenString string) (string, string, error) {

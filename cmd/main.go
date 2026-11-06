@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"time"
 
@@ -14,7 +16,6 @@ import (
 	"pet-community/repository"
 	"pet-community/router"
 	"pet-community/service"
-	"pet-community/types"
 	"pet-community/utils"
 )
 
@@ -31,62 +32,8 @@ func main() {
 	}
 	log.Printf("storage driver=%s", store.Driver())
 
-	if err := config.DB.AutoMigrate(
-		&model.AdminUser{},
-		&model.AdminOperationLog{},
-		&model.AdminLoginLog{},
-		&model.SystemConfig{},
-		&model.SensitiveWord{},
-		&model.UserActivityLog{},
-		&model.UserBehaviorLog{},
-		&model.User{},
-		&model.UserDevice{},
-		&model.VerificationCode{},
-		&model.UserThirdAccount{},
-		&model.SystemNotification{},
-		&model.Announcement{},
-		&model.Pet{},
-		&model.PetBreed{},
-		&model.PetAlbum{},
-		&model.PetGrowthRecord{},
-		&model.LostPet{},
-		&model.Post{},
-		&model.Comment{},
-		&model.Like{},
-		&model.Favorite{},
-		&model.Draft{},
-		&model.Report{},
-		&model.Topic{},
-		&model.ShareRecord{},
-		&model.UserNotification{},
-		&model.Follow{},
-		&model.Block{},
-		&model.Conversation{},
-		&model.Message{},
-		&model.UserLevel{},
-		&model.PointsRecord{},
-		&model.PointsRule{},
-		&model.LevelBenefit{},
-		&model.NotificationSettings{},
-		&model.SearchHistory{},
-		&model.UserInterest{},
-		&model.TopicCategory{},
-		&model.TopicParticipant{},
-		&model.HotKeyword{},
-		&model.Activity{},
-		&model.Registration{},
-		&model.Submission{},
-		&model.Vote{},
-		&model.SignIn{},
-		&model.ActivityAlbum{},
-		&model.ActivityReview{},
-		&model.Adopt{},
-		&model.AdoptionApplication{},
-		&model.AdoptionFollowUp{},
-		&model.Statistics{},
-		&model.AdPosition{},
-		&model.Advertisement{},
-	); err != nil {
+	// 表结构唯一来源见 config.Models()；新增模型记得同步 sql/init/create.sql
+	if err := config.DB.AutoMigrate(config.Models()...); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}
 
@@ -227,11 +174,15 @@ func main() {
 
 	wsService := service.NewWebSocketService()
 	messageService.SetWebSocketService(wsService)
+	// 在线状态以 WebSocket 连接态为准（见 FollowService.GetOnlineStatus）
+	followService.SetPresence(wsService)
 
-	topicRepo.InitDefaultTopics()
-	topicCategoryRepo.InitDefaultCategories()
-	_ = pointsRuleRepo.InitDefaultRules()
-	_ = levelBenefitRepo.InitDefaultBenefits()
+	// 种子数据失败不阻断启动（缺数据不等于服务不可用），但必须留痕：
+	// 静默失败会让「话题广场空着 / 积分规则缺失」变成无从排查的现象。
+	logSeedErr("初始化默认话题", topicRepo.InitDefaultTopics())
+	logSeedErr("初始化话题分类", topicCategoryRepo.InitDefaultCategories())
+	logSeedErr("初始化积分规则", pointsRuleRepo.InitDefaultRules())
+	logSeedErr("初始化等级权益", levelBenefitRepo.InitDefaultBenefits())
 
 	activityRepo := repository.NewActivityRepository(config.DB)
 	registrationRepo := repository.NewRegistrationRepository(config.DB)
@@ -243,7 +194,14 @@ func main() {
 
 	activityService := service.NewActivityService(activityRepo, registrationRepo, submissionRepo, voteRepo, userRepo)
 	registrationService := service.NewRegistrationService(registrationRepo, activityRepo, userRepo)
-	submissionService := service.NewSubmissionService(submissionRepo, activityRepo, registrationRepo, userRepo, voteRepo)
+	submissionService := service.NewSubmissionService(service.SubmissionServiceDeps{
+		SubmissionRepo:   submissionRepo,
+		ActivityRepo:     activityRepo,
+		RegistrationRepo: registrationRepo,
+		UserRepo:         userRepo,
+		VoteRepo:         voteRepo,
+		NotificationRepo: notificationRepo,
+	})
 	voteService := service.NewVoteService(voteRepo, submissionRepo, activityRepo, userRepo)
 	signInService := service.NewSignInService(signInRepo, activityRepo, registrationRepo, userRepo)
 	albumService := service.NewAlbumService(albumRepo, activityRepo, registrationRepo, userRepo)
@@ -272,32 +230,32 @@ func main() {
 	r.Use(middleware.CSRFMiddleware())
 	r.Use(middleware.RateLimitMiddleware())
 
-	r.GET("/health", adminCtrls.Auth.HealthCheck)
-	r.GET("/api/v1/csrf-token", middleware.IssueCSRFToken)
-	r.GET("/api/v1/public-key", func(c *gin.Context) {
-		c.JSON(200, types.SuccessResponse(gin.H{
-			"publicKey": utils.GetPublicKey(),
-		}))
+	// 路由表统一由 router.RegisterRoutes 注册，契约测试复用同一入口
+	router.RegisterRoutes(r, router.Handlers{
+		Admin:                adminCtrls,
+		User:                 userController,
+		Pet:                  petController,
+		Post:                 postController,
+		Notification:         notificationController,
+		Follow:               followController,
+		Block:                blockController,
+		Message:              messageController,
+		Points:               pointsController,
+		NotificationSettings: notificationSettingsController,
+		Discovery:            discoveryController,
+		Activity:             activityController,
+		Adopt:                adoptController,
+		FrontAd:              frontAdController,
+		Site:                 siteController,
+		Upload:               uploadController,
 	})
+
+	// WebSocket 入口带运行时状态，单独挂载
 	r.GET("/ws", middleware.WebSocketAuthMiddleware(), func(c *gin.Context) {
 		wsService.ServeWS(c.Writer, c.Request)
 	})
 
 	startSchedulers(statsService, adminNotifySvc, postService, adService)
-
-	apiV1 := r.Group("/api/v1")
-	router.RegisterAdminRoutes(r, adminCtrls)
-	router.SetupUserRoutes(apiV1, userController)
-	router.SetupPetRoutes(apiV1, petController)
-	router.SetupPostRoutes(apiV1, postController)
-	router.SetupNotificationRoutes(apiV1, notificationController, followController)
-	router.SetupSocialRoutes(apiV1, blockController, messageController, pointsController, notificationSettingsController, followController)
-	router.SetupDiscoveryRoutes(apiV1, discoveryController)
-	router.SetupActivityRoutes(apiV1, activityController)
-	router.SetupAdoptRoutes(apiV1, adoptController)
-	router.SetupAdRoutes(apiV1, frontAdController)
-	router.SetupSiteRoutes(apiV1, siteController)
-	router.SetupUploadRoutes(apiV1, uploadController)
 
 	addr := config.Cfg.Addr()
 	log.Printf("server listening on %s", addr)
@@ -322,18 +280,40 @@ func ensureDefaultAdmin() {
 	if count > 0 {
 		return
 	}
-	hashedPassword, err := utils.HashPassword("admin123")
+
+	username := config.Cfg.Admin.InitialUsername
+	if username == "" {
+		username = "admin"
+	}
+	// 口令不再硬编码：配置留空时随机生成，并在日志里打印一次供首次登录后修改
+	password := config.Cfg.Admin.InitialPassword
+	generated := false
+	if password == "" {
+		buf := make([]byte, 9)
+		if _, err := rand.Read(buf); err != nil {
+			log.Fatalf("generate admin password: %v", err)
+		}
+		password = hex.EncodeToString(buf)
+		generated = true
+	}
+
+	hashedPassword, err := utils.HashPassword(password)
 	if err != nil {
 		log.Fatalf("hash default admin password: %v", err)
 	}
 	if err := config.DB.Create(&model.AdminUser{
-		Username: "admin",
+		Username: username,
 		Password: hashedPassword,
 		Email:    "admin@petcommunity.com",
 		Role:     "super_admin",
 		Status:   1,
 	}).Error; err != nil {
 		log.Fatalf("create default admin: %v", err)
+	}
+	if generated {
+		log.Printf("已创建初始超级管理员 %s，随机口令：%s（请登录后立即修改）", username, password)
+	} else {
+		log.Printf("已按 config.yaml 的 admin 配置创建初始超级管理员 %s", username)
 	}
 }
 
@@ -372,5 +352,12 @@ func startSchedulers(
 func mustAddCron(c *cron.Cron, name, expr string, fn func()) {
 	if _, err := c.AddFunc(expr, fn); err != nil {
 		log.Fatalf("invalid %s %q: %v", name, expr, err)
+	}
+}
+
+// logSeedErr 记录种子数据初始化失败，不阻断启动。
+func logSeedErr(action string, err error) {
+	if err != nil {
+		log.Printf("[warn] %s失败（服务继续启动，相关功能可能不可用）: %v", action, err)
 	}
 }

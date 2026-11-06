@@ -12,6 +12,7 @@ import (
 	"pet-community/model"
 	"pet-community/repository"
 	"pet-community/types"
+	"pet-community/utils"
 
 	"gorm.io/gorm"
 )
@@ -635,7 +636,11 @@ func (s *PostService) CancelScheduleToDraft(userID, postID uint) (*types.DraftIn
 		return nil, err
 	}
 	if err := s.postRepo.Delete(postID); err != nil {
-		_ = s.draftRepo.Delete(draft.ID)
+		// 补偿：撤销刚建的草稿。补偿失败会留下一条幽灵草稿（用户看到「已取消」却没进草稿箱），
+		// 但主操作已失败，返回值不能被补偿结果覆盖，只能留痕供排查。
+		if rollbackErr := s.draftRepo.Delete(draft.ID); rollbackErr != nil {
+			utils.LogError(rollbackErr, "CancelScheduledPost rollback draft")
+		}
 		return nil, err
 	}
 
@@ -1285,6 +1290,11 @@ func (s *CommentService) CreateComment(userID uint, req *types.CommentCreateRequ
 			if err := tx.Model(&model.Post{}).Where("id = ?", req.PostID).UpdateColumn("comments_count", gorm.Expr("comments_count + 1")).Error; err != nil {
 				return err
 			}
+		} else {
+			// reply_count 原由 SQL 触发器维护，触发器已移除，改由本事务唯一维护
+			if err := tx.Model(&model.Comment{}).Where("id = ?", parent.ID).UpdateColumn("reply_count", gorm.Expr("reply_count + 1")).Error; err != nil {
+				return err
+			}
 		}
 
 		return nil
@@ -1361,6 +1371,11 @@ func (s *CommentService) DeleteComment(userID, commentID uint) error {
 
 		if comment.ParentID == 0 {
 			if err := tx.Model(&model.Post{}).Where("id = ?", comment.PostID).UpdateColumn("comments_count", gorm.Expr("comments_count - 1")).Error; err != nil {
+				return err
+			}
+		} else {
+			// 与创建时对称：回复被删时回退父评论的 reply_count
+			if err := tx.Model(&model.Comment{}).Where("id = ?", comment.ParentID).UpdateColumn("reply_count", gorm.Expr("reply_count - 1")).Error; err != nil {
 				return err
 			}
 		}

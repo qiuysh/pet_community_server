@@ -225,10 +225,10 @@ func (c *AdoptController) ListApplicationsByAdoption(ctx *gin.Context) {
 		return
 	}
 
-	statusStr := ctx.Query("status")
-	status := -1
-	if statusStr != "" {
-		status, _ = strconv.Atoi(statusStr)
+	status, statusErr := ParseIntQueryDefault(ctx, "status", -1)
+	if statusErr != nil {
+		utils.RespondError(ctx, types.CodeParamError, "状态参数无效")
+		return
 	}
 
 	pageStr := ctx.DefaultQuery("page", "1")
@@ -249,10 +249,10 @@ func (c *AdoptController) ListApplicationsByAdoption(ctx *gin.Context) {
 // ListMyApplications 我的领养申请列表
 func (c *AdoptController) ListMyApplications(ctx *gin.Context) {
 	userID := ctx.GetUint("user_id")
-	statusStr := ctx.Query("status")
-	status := -1
-	if statusStr != "" {
-		status, _ = strconv.Atoi(statusStr)
+	status, statusErr := ParseIntQueryDefault(ctx, "status", -1)
+	if statusErr != nil {
+		utils.RespondError(ctx, types.CodeParamError, "状态参数无效")
+		return
 	}
 
 	pageStr := ctx.DefaultQuery("page", "1")

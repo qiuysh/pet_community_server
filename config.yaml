@@ -4,6 +4,42 @@ server:
   host: "0.0.0.0"
   port: 8083
   timeout: 30
+  # 运行环境：development（允许验证码回传响应，便于联调）/ production
+  env: "development"
+
+# 首次启动且库中无后台账号时创建的超管；initial_password 留空则随机生成并打印一次
+# 生产环境务必覆盖为强口令（或留空走随机生成）
+admin:
+  initial_username: "admin"
+  initial_password: "admin123"
+
+# 第三方登录（微信 / 微博 / QQ）
+# 安全约定：openID 只能由服务端拿 code 调平台 OAuth 接口换取；
+# 未配置凭据的平台会直接拒绝登录，绝不会用 code 本地拼装身份。
+third_party:
+  # 演示模式：不调用真实 OAuth，直接用 code 派生稳定 openID。
+  # 仅 server.env=development 时生效，其它环境会被强制忽略（等同未配置）。
+  demo_mode: true
+  wechat:
+    app_id: ""
+    app_secret: ""
+    # 微信网页授权回调地址，需与开放平台配置一致
+    redirect_uri: ""
+    # 可选覆盖（自建代理/测试用），留空用官方地址
+    token_url: ""
+    user_info_url: ""
+  weibo:
+    app_id: ""
+    app_secret: ""
+    redirect_uri: ""
+    token_url: ""
+    user_info_url: ""
+  qq:
+    app_id: ""
+    app_secret: ""
+    redirect_uri: ""
+    token_url: ""
+    user_info_url: ""
 
 database:
   host: localhost

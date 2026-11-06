@@ -110,7 +110,7 @@ func (Report) TableName() string {
 
 type Topic struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"size:50;unique;not null" json:"name"`
+	Name        string    `gorm:"size:50;uniqueIndex:uk_topics_name;not null" json:"name"`
 	Description string    `gorm:"size:200" json:"description"`
 	Cover       string    `gorm:"size:255" json:"cover"`
 	CategoryID  uint      `gorm:"index;default:0" json:"categoryId"` // 话题分类（TopicCategory）

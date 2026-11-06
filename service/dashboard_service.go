@@ -1,9 +1,11 @@
 package service
 
 import (
+	"time"
+
 	"pet-community/repository"
 	"pet-community/types"
-	"time"
+	"pet-community/utils"
 )
 
 // DashboardService 运营驾驶舱服务 - 实时概览与待办聚合
@@ -186,22 +188,22 @@ func (s *DashboardService) getPostTrend() (*types.TrendData, error) {
 func (s *DashboardService) GetTodoAggregate() (*types.TodoAggregate, error) {
 	items := make([]types.TodoItem, 0)
 
-	pendingPosts, _ := s.adminRepo.CountPostsByStatus(0)
+	pendingPosts := s.countPending("pending_posts", func() (int64, error) { return s.adminRepo.CountPostsByStatus(0) })
 	items = append(items, types.TodoItem{
 		Key: "pending_posts", Label: "待审核帖子", Count: int(pendingPosts), Link: "/admin/reviews",
 	})
 
-	var pendingReports int64
-	if s.reportRepo != nil {
-		pendingReports, _ = s.reportRepo.CountByStatus(0)
-	} else {
-		pendingReports, _ = s.adminRepo.CountReportsByStatus(0)
-	}
+	pendingReports := s.countPending("pending_reports", func() (int64, error) {
+		if s.reportRepo != nil {
+			return s.reportRepo.CountByStatus(0)
+		}
+		return s.adminRepo.CountReportsByStatus(0)
+	})
 	items = append(items, types.TodoItem{
 		Key: "pending_reports", Label: "待处理举报", Count: int(pendingReports), Link: "/admin/reports",
 	})
 
-	pendingAds, _ := s.adminRepo.CountAdvertisementsByStatus(0)
+	pendingAds := s.countPending("pending_ads", func() (int64, error) { return s.adminRepo.CountAdvertisementsByStatus(0) })
 	items = append(items, types.TodoItem{
 		Key: "pending_ads", Label: "待审核广告", Count: int(pendingAds), Link: "/admin/ads",
 	})
@@ -219,4 +221,17 @@ func (s *DashboardService) GetTodoAggregate() (*types.TodoAggregate, error) {
 	}
 
 	return &types.TodoAggregate{Items: items, Total: total}, nil
+}
+
+// countPending 统计「待办积压」类指标，失败时留痕并降级为 0。
+//
+// 只对会驱动运营动作的计数使用：驾驶舱里「待审核帖子 0 / 待处理举报 0」
+// 会让运营以为没有积压，比整页报错更危险。其它累计类指标失败降级为 0
+// 只影响展示，保持原有 `_` 降级即可。
+func (s *DashboardService) countPending(label string, fn func() (int64, error)) int64 {
+	v, err := fn()
+	if err != nil {
+		utils.LogError(err, "dashboard."+label)
+	}
+	return v
 }

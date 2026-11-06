@@ -69,7 +69,10 @@ func (s *AdminAuthService) Login(username, password, ip, userAgent string) (stri
 			until := time.Now().Add(loginLockDuration)
 			admin.LockedUntil = &until
 			admin.FailedLoginCount = 0
-			_ = s.adminRepo.Update(admin)
+			// Redis 已锁定，DB 落库失败只影响重启后的锁定状态，记日志便于排查
+			if uerr := s.adminRepo.Update(admin); uerr != nil {
+				util.LogError(uerr, "AdminAuthService.Login.persistLock")
+			}
 			s.recordLoginLog(admin.ID, username, ip, userAgent, 0, "账号已锁定")
 			return "", nil, cache.ErrLoginLocked
 		} else if ferr == nil {
@@ -81,7 +84,10 @@ func (s *AdminAuthService) Login(username, password, ip, userAgent string) (stri
 				admin.LockedUntil = &until
 				admin.FailedLoginCount = 0
 			}
-			_ = s.adminRepo.Update(admin)
+			// Redis 不可用时失败次数只能落库，落库失败会让暴力破解防护失效，必须留痕
+			if uerr := s.adminRepo.Update(admin); uerr != nil {
+				util.LogError(uerr, "AdminAuthService.Login.persistFailedLoginCount")
+			}
 		}
 		s.recordLoginLog(admin.ID, username, ip, userAgent, 0, "密码错误")
 		return "", nil, errors.New("用户名或密码错误")
@@ -90,7 +96,10 @@ func (s *AdminAuthService) Login(username, password, ip, userAgent string) (stri
 	cache.ClearLoginFailures(cache.LoginScopeAdmin, admin.ID)
 	admin.FailedLoginCount = 0
 	admin.LockedUntil = nil
-	_ = s.adminRepo.Update(admin)
+	// 登录成功清零失败计数；失败不阻断登录，原锁定状态仍会在下次登录时被校验
+	if uerr := s.adminRepo.Update(admin); uerr != nil {
+		util.LogError(uerr, "AdminAuthService.Login.resetLoginState")
+	}
 
 	token, err := util.GenerateToken(admin.ID, admin.Username, normalizeAdminRole(admin.Role))
 	if err != nil {

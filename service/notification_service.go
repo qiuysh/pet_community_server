@@ -174,6 +174,7 @@ type FollowService struct {
 	notificationRepo *repository.NotificationRepository
 	blockRepo        *repository.BlockRepository
 	pointsService    *PointsService
+	presence         OnlinePresence
 }
 
 func NewFollowService(
@@ -194,6 +195,11 @@ func (s *FollowService) SetBlockRepository(blockRepo *repository.BlockRepository
 
 func (s *FollowService) SetPointsService(ps *PointsService) {
 	s.pointsService = ps
+}
+
+// SetPresence 注入在线连接态来源（WebSocket 连接表）；未注入时退化为仅按登录时间判断。
+func (s *FollowService) SetPresence(p OnlinePresence) {
+	s.presence = p
 }
 
 func (s *FollowService) Unfollow(followerID, followingID uint) error {
@@ -309,21 +315,24 @@ func (s *FollowService) GetSecretFollowing(userID uint, page, pageSize int) ([]m
 	return users, total, nil
 }
 
-// GetOnlineStatus 获取用户在线状态（根据最后登录时间判断）
+// GetOnlineStatus 获取用户在线状态。
+//
+// 1=在线：当前持有 WebSocket 连接（连接态）；
+// 2=最近活跃：24 小时内登录过，但当前无连接；
+// 0=离线。
+//
+// 旧实现仅按 lastLoginAt 5 分钟内判定「在线」，与连接无关，会让已退出的用户长期显示在线。
 func (s *FollowService) GetOnlineStatus(userID uint) (int, error) {
 	user, err := s.userRepo.GetByID(userID)
 	if err != nil {
 		return 0, err
 	}
 
-	if user.LastLoginAt == nil {
-		return 0, nil // 离线
+	if s.presence != nil && s.presence.IsOnline(userID) {
+		return 1, nil
 	}
 
-	if time.Since(*user.LastLoginAt) < 5*time.Minute {
-		return 1, nil // 在线
-	}
-	if time.Since(*user.LastLoginAt) < 24*time.Hour {
+	if user.LastLoginAt != nil && time.Since(*user.LastLoginAt) < 24*time.Hour {
 		return 2, nil // 最近活跃
 	}
 	return 0, nil // 离线

@@ -76,9 +76,9 @@ type TopicDetailInfo struct {
 	CreatedAt         string `json:"createdAt"`
 }
 
+// TopicShareResponse 话题分享结果；二维码由前端用 shareUrl 本地渲染，服务端不再返回图像内容。
 type TopicShareResponse struct {
 	ShareURL string `json:"shareUrl"`
-	QRCode   string `json:"qrCode,omitempty"`
 }
 
 type RecommendPostInfo struct {

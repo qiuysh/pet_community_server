@@ -29,9 +29,12 @@ CREATE TABLE IF NOT EXISTS users (
     location VARCHAR(100) COMMENT '所在地',
     pet_years VARCHAR(20) COMMENT '养宠年限',
     privacy_settings JSON DEFAULT (JSON_OBJECT('visibility', 'public', 'commentPermission', 'all', 'atNotification', true, 'messagePermission', 'all', 'recommendEnabled', true)) COMMENT '隐私设置',
-    status TINYINT DEFAULT 0 COMMENT '状态（0-正常，1-封禁）',
+    status TINYINT DEFAULT 0 COMMENT '状态（0-禁用/未激活，1-正常，2-封禁）',
     points INT DEFAULT 0 COMMENT '积分',
     level TINYINT DEFAULT 1 COMMENT '等级（1-10级）',
+    token_version INT NOT NULL DEFAULT 0 COMMENT 'Token 版本（递增使旧 token 全部失效）',
+    failed_login_count INT NOT NULL DEFAULT 0 COMMENT '连续登录失败次数',
+    locked_until DATETIME COMMENT '登录锁定截止时间（NULL=未锁定）',
     last_login_at DATETIME COMMENT '最后登录时间',
     last_login_ip VARCHAR(50) COMMENT '最后登录IP',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -151,6 +154,7 @@ CREATE TABLE IF NOT EXISTS pet_albums (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '相册ID（主键）',
     pet_id BIGINT UNSIGNED NOT NULL COMMENT '宠物ID（外键）',
     image_url VARCHAR(255) NOT NULL COMMENT '照片URL',
+    media_type VARCHAR(20) NOT NULL DEFAULT 'image' COMMENT '媒体类型（image/video）',
     thumb_url VARCHAR(255) COMMENT '缩略图URL',
     title VARCHAR(100) COMMENT '照片标题',
     sort_order INT DEFAULT 0 COMMENT '排序顺序',
@@ -199,7 +203,8 @@ CREATE TABLE IF NOT EXISTS topic_categories (
 -- ========================================
 CREATE TABLE IF NOT EXISTS topics (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '话题ID（主键）',
-    category_id BIGINT UNSIGNED COMMENT '分类ID（外键）',
+    category_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '分类ID（0=未分类）',
+    creator_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '创建者ID（0=系统/运营）',
     name VARCHAR(50) NOT NULL COMMENT '话题名称',
     description VARCHAR(200) COMMENT '话题描述',
     cover VARCHAR(255) COMMENT '话题封面',
@@ -207,15 +212,17 @@ CREATE TABLE IF NOT EXISTS topics (
     shares_count INT DEFAULT 0 COMMENT '分享数（用户选择分享平台后累加）',
     followers_count INT DEFAULT 0 COMMENT '关注数',
     sort_order INT DEFAULT 0 COMMENT '排序顺序',
-    status TINYINT DEFAULT 1 COMMENT '状态（0-待审核，1-正常，2-关闭）',
+    status TINYINT DEFAULT 1 COMMENT '状态（0-待审核，1-正常，2-关闭，3-拒绝）',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     INDEX idx_topics_category_id (category_id),
-    INDEX idx_topics_name (name),
+    INDEX idx_topics_creator_id (creator_id),
     INDEX idx_topics_status (status),
     INDEX idx_topics_posts_count (posts_count DESC),
-    UNIQUE KEY uk_topics_name (name),
-    FOREIGN KEY (category_id) REFERENCES topic_categories(id) ON DELETE SET NULL
+    UNIQUE KEY uk_topics_name (name)
+    -- category_id 用 0 作为「未分类」的哨兵值（Topic.CategoryID 为 uint，ORM 零值即 0），
+    -- 因此不能加外键：0 不存在于 topic_categories(id)，新建话题不选分类时会报 1452。
+    -- 与 pets.breed_id 的处理保持一致；分类有效性由业务层在 CategoryID > 0 时校验。
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='话题表';
 
 -- ========================================
@@ -541,7 +548,6 @@ CREATE TABLE IF NOT EXISTS points_rules (
     daily_limit INT DEFAULT 0 COMMENT '每日上限（0表示无限制）',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    INDEX idx_points_rules_type (type),
     INDEX idx_points_rules_is_active (is_active),
     UNIQUE KEY uk_points_rules_type (type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='积分规则表';
@@ -625,6 +631,7 @@ CREATE TABLE IF NOT EXISTS activity_registrations (
     activity_id BIGINT UNSIGNED NOT NULL COMMENT '活动ID（外键）',
     user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID（外键）',
     status TINYINT DEFAULT 0 COMMENT '状态（0-审核中，1-已通过，2-已拒绝，3-已取消）',
+    priority TINYINT NOT NULL DEFAULT 0 COMMENT '报名优先级（1=高等级用户优先排队，0=普通）',
     name VARCHAR(50) NOT NULL COMMENT '报名人姓名',
     phone VARCHAR(20) NOT NULL COMMENT '联系电话',
     message VARCHAR(200) COMMENT '备注信息',
@@ -633,6 +640,7 @@ CREATE TABLE IF NOT EXISTS activity_registrations (
     INDEX idx_activity_registrations_activity_id (activity_id),
     INDEX idx_activity_registrations_user_id (user_id),
     INDEX idx_activity_registrations_status (status),
+    INDEX idx_activity_registrations_priority (priority),
     UNIQUE KEY uk_activity_registrations (activity_id, user_id),
     FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -967,7 +975,6 @@ CREATE TABLE IF NOT EXISTS hot_keywords (
     `rank` INT DEFAULT 0 COMMENT '排名',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    INDEX idx_hot_keywords_keyword (keyword),
     INDEX idx_hot_keywords_rank (`rank`),
     UNIQUE KEY uk_hot_keywords_keyword (keyword)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='热关键词表';
@@ -984,14 +991,14 @@ CREATE TABLE IF NOT EXISTS admin_users (
     phone VARCHAR(20) COMMENT '手机号',
     role VARCHAR(20) NOT NULL DEFAULT 'content_admin' COMMENT '角色（super_admin/content_admin/data_admin/service）',
     status TINYINT DEFAULT 1 COMMENT '状态（0-禁用，1-正常）',
+    failed_login_count INT NOT NULL DEFAULT 0 COMMENT '连续登录失败次数',
+    locked_until DATETIME COMMENT '登录锁定截止时间（NULL=未锁定）',
     last_login_at DATETIME COMMENT '最后登录时间',
     last_login_ip VARCHAR(50) COMMENT '最后登录IP',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    deleted_at DATETIME COMMENT '删除时间（软删除）',
-    INDEX idx_admin_users_username (username),
+    deleted_at DATETIME COMMENT '删除时间（历史列，当前 Delete 为硬删除，保留供审计兼容；不加索引）',
     INDEX idx_admin_users_status (status),
-    INDEX idx_admin_users_deleted_at (deleted_at),
     UNIQUE KEY uk_admin_users_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='后台用户表';
 
@@ -1043,7 +1050,6 @@ CREATE TABLE IF NOT EXISTS sensitive_words (
     category VARCHAR(50) COMMENT '分类',
     status TINYINT DEFAULT 1 COMMENT '状态（0-禁用，1-启用）',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    INDEX idx_sensitive_words_word (word),
     INDEX idx_sensitive_words_status (status),
     UNIQUE KEY uk_sensitive_words_word (word)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='敏感词表';
@@ -1058,7 +1064,6 @@ CREATE TABLE IF NOT EXISTS system_config (
     description VARCHAR(200) COMMENT '配置描述',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    INDEX idx_system_config_config_key (config_key),
     UNIQUE KEY uk_system_config_config_key (config_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统配置表';
 
@@ -1289,24 +1294,31 @@ WHERE NOT EXISTS (SELECT 1 FROM system_notifications LIMIT 1);
 -- 创建视图
 -- ========================================
 
+-- 注意：users.status 的代码口径是 1=正常、0=禁用、2=封禁（见 model/user.go 与 UserService 登录校验），
+--       早期注释「0=正常、1=封禁」是错的，此处统计口径以代码为准。
 DROP VIEW IF EXISTS v_user_stats;
 CREATE VIEW v_user_stats AS
 SELECT 
     COUNT(*) as total_users,
-    SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as active_users,
-    SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as banned_users,
+    SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as active_users,
+    SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) as banned_users,
     DATE_FORMAT(created_at, '%Y-%m-%d') as date,
-    COUNT(*) OVER (ORDER BY DATE_FORMAT(created_at, '%Y-%m-%d')) as cumulative_users
+    -- 累计用户数 = 每日新增的累加（窗口函数套聚合：GROUP BY 之后再开窗）
+    -- 旧写法 COUNT(*) OVER (ORDER BY ...) 算的是「累计天数」，恒等于行号，已修正
+    SUM(COUNT(*)) OVER (ORDER BY DATE_FORMAT(created_at, '%Y-%m-%d')) as cumulative_users
 FROM users
 GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d');
 
+-- posts.status 口径：0=待审核、1=已发布、2=定时待发、3=已拒绝（见 service/privacy_helper.go 的 PostStatus* 常量）。
+-- 2 是「定时待发」而非「已拒绝」，早期脚本把它算成 rejected 是错的。
 DROP VIEW IF EXISTS v_post_stats;
 CREATE VIEW v_post_stats AS
 SELECT 
     COUNT(*) as total_posts,
     SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as published_posts,
     SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as pending_posts,
-    SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) as rejected_posts,
+    SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) as scheduled_posts,
+    SUM(CASE WHEN status = 3 THEN 1 ELSE 0 END) as rejected_posts,
     SUM(likes_count) as total_likes,
     SUM(comments_count) as total_comments,
     SUM(shares_count) as total_shares,
@@ -1345,10 +1357,11 @@ DELIMITER //
 DROP PROCEDURE IF EXISTS GetUserStats //
 CREATE PROCEDURE GetUserStats(IN start_date DATE, IN end_date DATE)
 BEGIN
+    -- 口径同 v_user_stats：1=正常、2=封禁（0 为禁用/未激活）
     SELECT 
         COUNT(*) as total_users,
-        SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as active_users,
-        SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as banned_users
+        SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as active_users,
+        SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) as banned_users
     FROM users
     WHERE created_at BETWEEN start_date AND DATE_ADD(end_date, INTERVAL 1 DAY);
 END //
@@ -1358,11 +1371,13 @@ DELIMITER //
 DROP PROCEDURE IF EXISTS GetPostStats //
 CREATE PROCEDURE GetPostStats(IN start_date DATE, IN end_date DATE)
 BEGIN
+    -- 口径同 v_post_stats：0=待审核、1=已发布、2=定时待发、3=已拒绝
     SELECT 
         COUNT(*) as total_posts,
         SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as published_posts,
         SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as pending_posts,
-        SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) as rejected_posts,
+        SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) as scheduled_posts,
+        SUM(CASE WHEN status = 3 THEN 1 ELSE 0 END) as rejected_posts,
         SUM(likes_count) as total_likes,
         SUM(comments_count) as total_comments,
         SUM(shares_count) as total_shares
@@ -1410,76 +1425,13 @@ END //
 DELIMITER ;
 
 -- ========================================
--- 触发器
+-- 计数列写入约定（2026-11-05 裁定）
 -- ========================================
-
-DELIMITER //
-CREATE TRIGGER IF NOT EXISTS tr_like_add
-AFTER INSERT ON likes
-FOR EACH ROW
-BEGIN
-    IF NEW.target_type = 'post' THEN
-        UPDATE posts SET likes_count = likes_count + 1 WHERE id = NEW.target_id;
-    ELSEIF NEW.target_type = 'comment' THEN
-        UPDATE comments SET likes_count = likes_count + 1 WHERE id = NEW.target_id;
-    END IF;
-END //
-DELIMITER ;
-
-DELIMITER //
-CREATE TRIGGER IF NOT EXISTS tr_like_remove
-AFTER DELETE ON likes
-FOR EACH ROW
-BEGIN
-    IF OLD.target_type = 'post' THEN
-        UPDATE posts SET likes_count = likes_count - 1 WHERE id = OLD.target_id;
-    ELSEIF OLD.target_type = 'comment' THEN
-        UPDATE comments SET likes_count = likes_count - 1 WHERE id = OLD.target_id;
-    END IF;
-END //
-DELIMITER ;
-
-DELIMITER //
-CREATE TRIGGER IF NOT EXISTS tr_comment_add
-AFTER INSERT ON comments
-FOR EACH ROW
-BEGIN
-    UPDATE posts SET comments_count = comments_count + 1 WHERE id = NEW.post_id;
-    IF NEW.parent_id IS NOT NULL AND NEW.parent_id > 0 THEN
-        UPDATE comments SET reply_count = reply_count + 1 WHERE id = NEW.parent_id;
-    END IF;
-END //
-DELIMITER ;
-
-DELIMITER //
-CREATE TRIGGER IF NOT EXISTS tr_comment_remove
-AFTER DELETE ON comments
-FOR EACH ROW
-BEGIN
-    UPDATE posts SET comments_count = comments_count - 1 WHERE id = OLD.post_id;
-    IF OLD.parent_id IS NOT NULL AND OLD.parent_id > 0 THEN
-        UPDATE comments SET reply_count = reply_count - 1 WHERE id = OLD.parent_id;
-    END IF;
-END //
-DELIMITER ;
-
-DELIMITER //
-CREATE TRIGGER IF NOT EXISTS tr_vote_add
-AFTER INSERT ON activity_votes
-FOR EACH ROW
-BEGIN
-    UPDATE activity_submissions SET votes_count = votes_count + 1 WHERE id = NEW.submission_id;
-END //
-DELIMITER ;
-
-DELIMITER //
-CREATE TRIGGER IF NOT EXISTS tr_vote_remove
-AFTER DELETE ON activity_votes
-FOR EACH ROW
-BEGIN
-    UPDATE activity_submissions SET votes_count = votes_count - 1 WHERE id = OLD.submission_id;
-END //
-DELIMITER ;
+-- likes_count / comments_count / reply_count / votes_count / favorites_count / shares_count
+-- 一律由 Go 服务层在事务内维护，**不使用数据库触发器**。
+-- 原因：触发器与 service 事务双写会让同一次点赞 +2，且只有跑过本文件建库的环境才有触发器，
+-- 两种环境计数口径天然不一致。历史库请执行
+-- sql/incremental/20261105000000_schema_fix_20261105.sql（第二节删触发器、第三节重算计数）收口。
 
 -- ========================================
 -- 创建用户定义函数

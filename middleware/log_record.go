@@ -91,107 +91,140 @@ func parseDevice(userAgent string) string {
 	return "desktop"
 }
 
+// extractActionType 归档行为类型。
+// 前缀必须与 server/router/*.go 的真实挂载路径一致：曾经写的是 /api/v1/users/login、
+// /api/v1/likes 等旧路径，导致 login / like / favorite 长期被记为 api_request。
 func extractActionType(path, method string) string {
 	switch {
-	case strings.HasPrefix(path, "/api/v1/users/login"):
+	case strings.HasPrefix(path, "/api/v1/auth/login"):
 		return "login"
-	case strings.HasPrefix(path, "/api/v1/users/logout"):
+	case strings.HasPrefix(path, "/api/v1/auth/logout"):
 		return "logout"
-	case strings.HasPrefix(path, "/api/v1/users/register"):
+	case strings.HasPrefix(path, "/api/v1/auth/register"):
 		return "register"
-	case strings.HasPrefix(path, "/api/v1/users/password"):
-		if method == "PUT" || method == "POST" {
-			return "password_change"
-		}
-	case strings.HasPrefix(path, "/api/v1/users/profile"):
+	case strings.HasPrefix(path, "/api/v1/auth/reset-password"),
+		strings.HasPrefix(path, "/api/v1/user/password"):
+		return "password_change"
+	case strings.HasPrefix(path, "/api/v1/user/profile"):
 		if method == "PUT" {
 			return "profile_update"
 		}
-	case strings.HasPrefix(path, "/api/v1/pets"):
-		if method == "POST" {
-			return "pet_create"
-		} else if method == "PUT" {
-			return "pet_update"
-		} else if method == "DELETE" {
-			return "pet_delete"
-		} else {
-			return "pet_view"
+	case strings.HasPrefix(path, "/api/v1/posts") && strings.HasSuffix(path, "/like"):
+		return "like"
+	case strings.HasPrefix(path, "/api/v1/posts") && strings.HasSuffix(path, "/favorite"):
+		return "favorite"
+	case strings.HasPrefix(path, "/api/v1/posts") && strings.HasSuffix(path, "/share"):
+		return "share"
+	case strings.HasPrefix(path, "/api/v1/posts/comments"):
+		switch method {
+		case "POST":
+			return "comment_create"
+		case "PUT":
+			return "comment_update"
+		case "DELETE":
+			return "comment_delete"
 		}
 	case strings.HasPrefix(path, "/api/v1/posts"):
-		if method == "POST" {
+		if strings.HasSuffix(path, "/comments") && method == "POST" {
+			return "comment_create"
+		}
+		switch method {
+		case "POST":
 			return "post_create"
-		} else if method == "PUT" {
+		case "PUT":
 			return "post_update"
-		} else if method == "DELETE" {
+		case "DELETE":
 			return "post_delete"
-		} else {
+		default:
 			return "post_view"
 		}
-	case strings.HasPrefix(path, "/api/v1/comments"):
-		if method == "POST" {
-			return "comment_create"
-		} else if method == "DELETE" {
-			return "comment_delete"
+	case strings.HasPrefix(path, "/api/v1/pets"):
+		switch method {
+		case "POST":
+			return "pet_create"
+		case "PUT":
+			return "pet_update"
+		case "DELETE":
+			return "pet_delete"
+		default:
+			return "pet_view"
 		}
 	case strings.HasPrefix(path, "/api/v1/likes"):
 		return "like"
 	case strings.HasPrefix(path, "/api/v1/favorites"):
 		return "favorite"
-	case strings.HasPrefix(path, "/api/v1/follows"):
-		if method == "POST" {
-			return "follow"
-		} else if method == "DELETE" {
+	case strings.HasPrefix(path, "/api/v1/social/follow"):
+		if method == "DELETE" {
 			return "unfollow"
 		}
-	case strings.HasPrefix(path, "/api/v1/activities"):
-		if method == "POST" {
+		return "follow"
+	case strings.HasPrefix(path, "/api/v1/users/"):
+		if strings.HasSuffix(path, "/follow") && (method == "POST" || method == "DELETE") {
+			if method == "DELETE" {
+				return "unfollow"
+			}
+			return "follow"
+		}
+	case strings.HasPrefix(path, "/api/v1/activities"), strings.HasPrefix(path, "/api/v1/admin/activities"):
+		switch {
+		case strings.HasSuffix(path, "/register"):
+			return "activity_register"
+		case strings.HasSuffix(path, "/cancel"):
+			return "activity_cancel"
+		case strings.HasSuffix(path, "/sign-in"):
+			return "activity_sign_in"
+		case strings.HasSuffix(path, "/vote") || strings.HasSuffix(path, "/cancel-vote"):
+			return "activity_vote"
+		case strings.HasSuffix(path, "/publish"), strings.HasSuffix(path, "/publish-award"):
+			return "activity_publish"
+		}
+		switch method {
+		case "POST":
 			return "activity_create"
-		} else if method == "PUT" {
+		case "PUT":
 			return "activity_update"
-		} else {
+		default:
 			return "activity_view"
 		}
-	case strings.HasPrefix(path, "/api/v1/adopt"):
+	case strings.HasPrefix(path, "/api/v1/adopts"):
 		if method == "POST" {
 			return "adopt_create"
-		} else {
-			return "adopt_view"
 		}
-	case strings.HasPrefix(path, "/api/v1/messages"):
+		return "adopt_view"
+	case strings.HasPrefix(path, "/api/v1/social/messages"):
 		if method == "POST" {
 			return "message_send"
-		} else {
-			return "message_view"
 		}
-	case strings.HasPrefix(path, "/api/v1/points"):
+		return "message_view"
+	case strings.HasPrefix(path, "/api/v1/social/points"):
 		return "points_query"
-	default:
-		return "api_request"
 	}
 	return "api_request"
 }
 
 func extractTargetType(path string) string {
 	switch {
-	case strings.HasPrefix(path, "/api/v1/pets"):
-		return "pet"
+	case strings.HasPrefix(path, "/api/v1/posts/comments"):
+		return "comment"
 	case strings.HasPrefix(path, "/api/v1/posts"):
 		return "post"
-	case strings.HasPrefix(path, "/api/v1/comments"):
-		return "comment"
-	case strings.HasPrefix(path, "/api/v1/likes"):
-		return "like"
+	case strings.HasPrefix(path, "/api/v1/pets"):
+		return "pet"
+	case strings.HasPrefix(path, "/api/v1/users/"), strings.HasPrefix(path, "/api/v1/social/follow"):
+		return "follow"
 	case strings.HasPrefix(path, "/api/v1/favorites"):
 		return "favorite"
-	case strings.HasPrefix(path, "/api/v1/follows"):
-		return "follow"
-	case strings.HasPrefix(path, "/api/v1/activities"):
+	case strings.HasPrefix(path, "/api/v1/likes"):
+		return "like"
+	case strings.HasPrefix(path, "/api/v1/activities"), strings.HasPrefix(path, "/api/v1/admin/activities"):
 		return "activity"
-	case strings.HasPrefix(path, "/api/v1/adopt"):
+	case strings.HasPrefix(path, "/api/v1/adopts"):
 		return "adopt"
-	case strings.HasPrefix(path, "/api/v1/messages"):
+	case strings.HasPrefix(path, "/api/v1/social/messages"):
 		return "message"
-	case strings.HasPrefix(path, "/api/v1/users"):
+	case strings.HasPrefix(path, "/api/v1/social/points"):
+		return "points"
+	case strings.HasPrefix(path, "/api/v1/auth"), strings.HasPrefix(path, "/api/v1/user"):
 		return "user"
 	default:
 		return ""

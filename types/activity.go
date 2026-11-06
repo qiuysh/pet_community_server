@@ -263,9 +263,8 @@ type SignInRequest struct {
 
 // QRCodeResponse 二维码响应
 type QRCodeResponse struct {
-	QRCode   string `json:"qrCode"`   // 二维码内容
-	ImageURL string `json:"imageUrl"` // 二维码图片URL（base64格式）
-	Expires  string `json:"expires"`  // 过期时间
+	QRCode  string `json:"qrCode"`  // 二维码内容，由前端渲染成图片
+	Expires string `json:"expires"` // 过期时间
 }
 
 // SignInListResponse 签到列表响应

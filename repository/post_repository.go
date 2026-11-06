@@ -538,8 +538,11 @@ func NewTopicRepository(db *gorm.DB) *TopicRepository {
 }
 
 func (r *TopicRepository) Create(topic *model.Topic) error {
-	// 显式 Select，避免 Status=0（待审核）被 GORM 零值省略后套用 default
-	return r.db.Select("Name", "Description", "Cover", "CreatorID", "PostsCount", "Status").Create(topic).Error
+	// 显式 Select：既要避免 Status=0（待审核）/ CategoryID=0（未分类）/ PostsCount=0
+	// 这类零值被 GORM 省略后套用 DB 默认值，也要保证列出全部「零值有意义」的列。
+	// 漏列会让列走 DB 默认（create.sql 里 category_id 曾是可空无默认 → 落 NULL，
+	// 之后 SELECT * 扫进 uint 直接报错），因此新增字段时务必同步这里。
+	return r.db.Select("Name", "Description", "Cover", "CategoryID", "CreatorID", "PostsCount", "Status").Create(topic).Error
 }
 
 func (r *TopicRepository) Update(topic *model.Topic) error {

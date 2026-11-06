@@ -47,11 +47,14 @@ func (s *AlbumService) UploadPhoto(userID uint, req *types.AlbumPhotoCreateReque
 		return nil, errors.New("只有线下活动才能上传相册照片")
 	}
 
-	// 检查是否已报名（可选）
-	// isRegistered, _ := s.registrationRepo.Exists(req.ActivityID, userID)
-	// if !isRegistered {
-	//     return nil, errors.New("请先报名活动")
-	// }
+	// 相册属于线下活动，只有报名用户才能上传现场照片
+	isRegistered, err := s.registrationRepo.Exists(req.ActivityID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isRegistered {
+		return nil, errors.New("请先报名活动")
+	}
 
 	album := &model.ActivityAlbum{
 		ActivityID:  req.ActivityID,

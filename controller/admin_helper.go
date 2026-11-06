@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
@@ -110,15 +111,74 @@ func ParseTimePtr(s *string) *time.Time {
 
 // ParseTimeRange 解析 "2006-01-02 15:04:05" 格式的起止时间。
 // 消除 8 处日志接口中相同的 startTime/endTime 解析代码。
-func ParseTimeRange(startStr, endStr string) (time.Time, time.Time) {
+//
+// 兼容两种精度：后台日志页的日期筛选用 granularity='day'（值为 YYYY-MM-DD），
+// 而报表/导出可能带时分秒。历史上这里用 `_ =` 吞掉解析错误，结果日期筛选
+// 永远解析失败、静默退化成「不限时间」，用户看到的是全量数据。
+// 因此解析失败必须返回错误由 controller 报 400；纯日期的结束时间补齐到
+// 当天 23:59:59，否则 created_at <= endTime 会漏掉当天记录。
+func ParseTimeRange(startStr, endStr string) (time.Time, time.Time, error) {
 	var startTime, endTime time.Time
+
 	if startStr != "" {
-		startTime, _ = time.Parse("2006-01-02 15:04:05", startStr)
+		parsed, _, err := parseTimeValue(startStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("开始时间格式无效: %s", startStr)
+		}
+		startTime = parsed // 起始时间取当天零点，语义正确
 	}
+
 	if endStr != "" {
-		endTime, _ = time.Parse("2006-01-02 15:04:05", endStr)
+		parsed, pureDate, err := parseTimeValue(endStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("结束时间格式无效: %s", endStr)
+		}
+		if pureDate {
+			// 日期粒度代表「截止到这一天结束」
+			parsed = parsed.Add(24*time.Hour - time.Second)
+		}
+		endTime = parsed
 	}
-	return startTime, endTime
+
+	return startTime, endTime, nil
+}
+
+// timeLayouts 按「越精确越先匹配」排列，避免日期字符串被宽松格式误判。
+var timeLayouts = []string{
+	"2006-01-02 15:04:05",
+	time.RFC3339,
+	"2006-01-02T15:04:05",
+	"2006-01-02",
+}
+
+// dateOnlyLayout 标记「只有日期」的布局，用于决定结束时间是否补齐到当天末尾。
+const dateOnlyLayout = "2006-01-02"
+
+// ParseIntQueryDefault 解析可选整数查询参数，非法值返回错误而不是静默回退默认值。
+//
+// 背景：`status, _ = strconv.Atoi(raw)` 这类写法会让 status=abc 变成 0，
+// 而 0 往往是「待审核」这样的有效状态 —— 用户传错参数看到的是被悄悄改过的筛选结果，
+// 比直接报错难排查得多。空值仍返回默认值（不筛选）。
+func ParseIntQueryDefault(ctx *gin.Context, key string, def int) (int, error) {
+	raw := ctx.Query(key)
+	if raw == "" {
+		return def, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return def, fmt.Errorf("%s 参数无效: %s", key, raw)
+	}
+	return v, nil
+}
+
+// parseTimeValue 依次尝试已知布局，返回解析结果与是否为纯日期。
+func parseTimeValue(raw string) (time.Time, bool, error) {
+	for _, layout := range timeLayouts {
+		if parsed, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return parsed, layout == dateOnlyLayout, nil
+		}
+	}
+	return time.Time{}, false, fmt.Errorf("unsupported time format: %s", raw)
 }
 
 // ParseUintParam 解析 URL path 参数为 uint。

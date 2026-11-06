@@ -13,13 +13,52 @@ import (
 
 // Config 应用配置（统一从 config.yaml 加载）
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Database  DatabaseConfig  `yaml:"database"`
-	JWT       JWTConfig       `yaml:"jwt"`
-	Scheduler SchedulerConfig `yaml:"scheduler"`
-	Redis     RedisConfig     `yaml:"redis"`
-	RateLimit RateLimitConfig `yaml:"rate_limit"`
-	Storage   StorageConfig   `yaml:"storage"`
+	Server     ServerConfig     `yaml:"server"`
+	Database   DatabaseConfig   `yaml:"database"`
+	JWT        JWTConfig        `yaml:"jwt"`
+	Scheduler  SchedulerConfig  `yaml:"scheduler"`
+	Redis      RedisConfig      `yaml:"redis"`
+	RateLimit  RateLimitConfig  `yaml:"rate_limit"`
+	Storage    StorageConfig    `yaml:"storage"`
+	Admin      AdminConfig      `yaml:"admin"`
+	ThirdParty ThirdPartyConfig `yaml:"third_party"`
+}
+
+// ThirdPartyConfig 第三方登录（微信 / 微博 / QQ）配置。
+// 安全约定：openID 只能由服务端调用平台 OAuth 接口换取，禁止用前端传入的 code 拼装，
+// 否则任何客户端都能伪造任意第三方身份登录。
+type ThirdPartyConfig struct {
+	// DemoMode 演示模式：不调用真实 OAuth，直接用 code 派生稳定 openID。
+	// 仅供本地联调；非 development 环境下会被强制忽略（视为未配置）。
+	DemoMode bool                     `yaml:"demo_mode"`
+	WeChat   ThirdPartyPlatformConfig `yaml:"wechat"`
+	Weibo    ThirdPartyPlatformConfig `yaml:"weibo"`
+	QQ       ThirdPartyPlatformConfig `yaml:"qq"`
+}
+
+// ThirdPartyPlatformConfig 单个第三方平台的 OAuth 配置。
+type ThirdPartyPlatformConfig struct {
+	// AppID / AppSecret 平台分配的客户端凭据，任一为空视为未配置
+	AppID     string `yaml:"app_id"`
+	AppSecret string `yaml:"app_secret"`
+	// RedirectURI 授权回调地址，微信/微博换取 token 时通常需要与申请时一致
+	RedirectURI string `yaml:"redirect_uri"`
+	// TokenURL / UserInfoURL 可选覆盖，便于自建代理或测试打桩；留空用官方地址
+	TokenURL    string `yaml:"token_url"`
+	UserInfoURL string `yaml:"user_info_url"`
+}
+
+// Configured 是否具备发起 OAuth 换取的最小凭据
+func (c ThirdPartyPlatformConfig) Configured() bool {
+	return c.AppID != "" && c.AppSecret != ""
+}
+
+// AdminConfig 初始超级管理员配置（仅在库中没有后台账号时用于首次创建）
+type AdminConfig struct {
+	// InitialUsername 初始超管用户名
+	InitialUsername string `yaml:"initial_username"`
+	// InitialPassword 初始超管口令；留空则随机生成并打印一次到日志
+	InitialPassword string `yaml:"initial_password"`
 }
 
 // 存储驱动：local 本地磁盘；oss / s3 为 S3 兼容对象存储（阿里云 OSS、腾讯云 COS、MinIO 等）
@@ -95,6 +134,26 @@ type ServerConfig struct {
 	Host    string `yaml:"host"`
 	Port    int    `yaml:"port"`
 	Timeout int    `yaml:"timeout"`
+	// Env 运行环境：development / test / production（缺省按 production 处理）
+	Env string `yaml:"env"`
+}
+
+// IsDev 是否开发环境。开发环境才允许把验证码回传到接口响应，便于联调。
+func IsDev() bool {
+	if Cfg == nil {
+		return false
+	}
+	return isDevEnv(Cfg.Server.Env)
+}
+
+// isDevEnv 判断给定环境名是否为开发环境（Cfg 未就绪时也可用）
+func isDevEnv(env string) bool {
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "dev", "development", "local":
+		return true
+	default:
+		return false
+	}
 }
 
 // DatabaseConfig 数据库配置
@@ -273,6 +332,11 @@ func validateConfig(cfg *Config) error {
 	}
 	if err := NormalizeStorageConfig(&cfg.Storage); err != nil {
 		return err
+	}
+	// 演示模式的 openID 由 code 派生，等同可伪造身份，只允许开发环境使用
+	if cfg.ThirdParty.DemoMode && !isDevEnv(cfg.Server.Env) {
+		log.Printf("WARN third_party.demo_mode ignored: only allowed when server.env is development")
+		cfg.ThirdParty.DemoMode = false
 	}
 	return nil
 }

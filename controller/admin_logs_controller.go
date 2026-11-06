@@ -22,7 +22,11 @@ func NewAdminLogsController(adminService *service.AdminLogService, authService *
 func (c *AdminLogsController) GetOperationLogs(ctx *gin.Context) {
 	adminID, _ := parseIntDefault(ctx.Query("adminId"), 0)
 	action := ctx.Query("action")
-	startTime, endTime := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	startTime, endTime, parseErr := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	if parseErr != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeParamError, parseErr.Error()))
+		return
+	}
 	page, limit := ParseLimitQuery(ctx, 100)
 	logs, total, err := c.adminService.GetOperationLogs(uint(adminID), action, startTime, endTime, page, limit)
 	if err != nil {
@@ -35,7 +39,11 @@ func (c *AdminLogsController) GetOperationLogs(ctx *gin.Context) {
 func (c *AdminLogsController) GetActivityLogs(ctx *gin.Context) {
 	userID, _ := parseIntDefault(ctx.Query("userId"), 0)
 	action := ctx.Query("action")
-	startTime, endTime := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	startTime, endTime, parseErr := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	if parseErr != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeParamError, parseErr.Error()))
+		return
+	}
 	page, limit := ParseLimitQuery(ctx, 100)
 	logs, total, err := c.adminService.GetActivityLogs(uint(userID), action, startTime, endTime, page, limit)
 	if err != nil {
@@ -48,7 +56,11 @@ func (c *AdminLogsController) GetActivityLogs(ctx *gin.Context) {
 func (c *AdminLogsController) GetLoginLogs(ctx *gin.Context) {
 	adminID, _ := parseIntDefault(ctx.Query("adminId"), 0)
 	status, _ := parseIntDefault(ctx.Query("status"), -1)
-	startTime, endTime := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	startTime, endTime, parseErr := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	if parseErr != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeParamError, parseErr.Error()))
+		return
+	}
 	page, limit := ParseLimitQuery(ctx, 100)
 	logs, total, err := c.authService.GetLoginLogs(uint(adminID), status, startTime, endTime, page, limit)
 	if err != nil {
@@ -62,7 +74,11 @@ func (c *AdminLogsController) GetUserBehaviorLogs(ctx *gin.Context) {
 	userID, _ := parseIntDefault(ctx.Query("userId"), 0)
 	actionType := ctx.Query("actionType")
 	targetType := ctx.Query("targetType")
-	startTime, endTime := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	startTime, endTime, parseErr := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	if parseErr != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeParamError, parseErr.Error()))
+		return
+	}
 	page, limit := ParseLimitQuery(ctx, 100)
 	logs, total, err := c.logService.GetBehaviorLogs(uint(userID), actionType, targetType, startTime, endTime, page, limit)
 	if err != nil {
@@ -75,7 +91,11 @@ func (c *AdminLogsController) GetUserBehaviorLogs(ctx *gin.Context) {
 func (c *AdminLogsController) GetOperationLogsV2(ctx *gin.Context) {
 	userID, _ := parseIntDefault(ctx.Query("userId"), 0)
 	actionType := ctx.Query("actionType")
-	startTime, endTime := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	startTime, endTime, parseErr := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	if parseErr != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeParamError, parseErr.Error()))
+		return
+	}
 	page, limit := ParseLimitQuery(ctx, 100)
 	logs, total, err := c.logService.GetOperationLogs(uint(userID), actionType, startTime, endTime, page, limit)
 	if err != nil {
@@ -87,7 +107,11 @@ func (c *AdminLogsController) GetOperationLogsV2(ctx *gin.Context) {
 
 func (c *AdminLogsController) GetSecurityAuditLogs(ctx *gin.Context) {
 	userID, _ := parseIntDefault(ctx.Query("userId"), 0)
-	startTime, endTime := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	startTime, endTime, parseErr := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	if parseErr != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeParamError, parseErr.Error()))
+		return
+	}
 	page, limit := ParseLimitQuery(ctx, 100)
 	logs, total, err := c.logService.GetSecurityAuditLogs(uint(userID), startTime, endTime, page, limit)
 	if err != nil {
@@ -101,7 +125,11 @@ func (c *AdminLogsController) ExportLogs(ctx *gin.Context) {
 	userID, _ := parseIntDefault(ctx.Query("userId"), 0)
 	actionType := ctx.Query("actionType")
 	targetType := ctx.Query("targetType")
-	startTime, endTime := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	startTime, endTime, parseErr := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	if parseErr != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeParamError, parseErr.Error()))
+		return
+	}
 	data, err := c.logService.ExportLogs(uint(userID), actionType, targetType, startTime, endTime)
 	if err != nil {
 		ctx.JSON(200, types.ErrorResponse(types.CodeSystemError, err.Error()))

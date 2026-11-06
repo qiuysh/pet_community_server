@@ -47,9 +47,14 @@ func (s *BlockService) BlockUser(blockerID, blockedID uint) error {
 	}
 
 	// F7：拉黑后自动双向取消关注
+	// 拉黑本身已落库，取关失败不回滚（否则用户被「半拉黑」），但必须留痕便于人工修复
 	if s.followRepo != nil {
-		_ = s.followRepo.Delete(blockerID, blockedID)
-		_ = s.followRepo.Delete(blockedID, blockerID)
+		if err := s.followRepo.Delete(blockerID, blockedID); err != nil {
+			utils.LogError(err, "BlockService.Block.unfollowBlockerToBlocked")
+		}
+		if err := s.followRepo.Delete(blockedID, blockerID); err != nil {
+			utils.LogError(err, "BlockService.Block.unfollowBlockedToBlocker")
+		}
 	}
 
 	return nil
