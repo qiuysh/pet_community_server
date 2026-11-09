@@ -1262,10 +1262,28 @@ func (s *CommentService) CreateComment(userID uint, req *types.CommentCreateRequ
 		}
 	}
 
-	atUsersStr := ""
+	// 与动态一致：正文 `@昵称` 解析 + 请求体 atUsers 合并，避免评论侧只能靠 ID 数组。
+	atIDSet := make(map[uint]struct{})
 	if len(req.AtUsers) > 0 {
-		var userIDStrs []string
 		for _, id := range req.AtUsers {
+			if id > 0 {
+				atIDSet[id] = struct{}{}
+			}
+		}
+	}
+	if s.notificationService != nil && req.Content != "" {
+		for _, id := range s.notificationService.ParseAtUsers(req.Content) {
+			atIDSet[id] = struct{}{}
+		}
+	}
+	atUserIDs := make([]uint, 0, len(atIDSet))
+	for id := range atIDSet {
+		atUserIDs = append(atUserIDs, id)
+	}
+	atUsersStr := ""
+	if len(atUserIDs) > 0 {
+		var userIDStrs []string
+		for _, id := range atUserIDs {
 			userIDStrs = append(userIDStrs, fmt.Sprintf("%d", id))
 		}
 		atUsersStr = strings.Join(userIDStrs, ",")
@@ -1315,7 +1333,6 @@ func (s *CommentService) CreateComment(userID uint, req *types.CommentCreateRequ
 			}
 		}
 
-		atUserIDs := ParseAtUsersFromString(atUsersStr)
 		if s.notificationService != nil && len(atUserIDs) > 0 {
 			go s.notificationService.SendAtNotifications(userID, "comment", comment.ID, req.Content, atUserIDs)
 		}

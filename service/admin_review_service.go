@@ -120,16 +120,18 @@ func (s *AdminReviewService) GetPendingReviews(reviewType string, page, pageSize
 				user = &model.User{}
 			}
 			contents = append(contents, types.ReviewContent{
-				ID:        post.ID,
-				Type:      "post",
-				Content:   post.Content,
-				Images:    post.Images,
-				Video:     post.Video,
-				UserID:    post.UserID,
-				Username:  user.Nickname,
-				Avatar:    user.Avatar,
-				Status:    post.Status,
-				CreatedAt: post.CreatedAt.Format(time.RFC3339),
+				ID:         post.ID,
+				Type:       "post",
+				Content:    post.Content,
+				Images:     post.Images,
+				Video:      post.Video,
+				UserID:     post.UserID,
+				Username:   user.Nickname,
+				Avatar:     user.Avatar,
+				Status:     post.Status,
+				IsPinned:   post.IsPinned,
+				IsFeatured: post.IsFeatured,
+				CreatedAt:  post.CreatedAt.Format(time.RFC3339),
 			})
 		}
 	}
