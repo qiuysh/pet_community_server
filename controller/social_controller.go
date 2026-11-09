@@ -460,22 +460,17 @@ func (c *NotificationSettingsController) GetSettings(ctx *gin.Context) {
 	utils.RespondSuccess(ctx, settings)
 }
 
+// UpdateSettings 更新通知设置（N8）。PUT 全量语义：客户端回传六个开关。
 func (c *NotificationSettingsController) UpdateSettings(ctx *gin.Context) {
 	userID := ctx.GetUint("user_id")
 
-	var req struct {
-		LikeNotify    int `json:"likeNotify"`
-		CommentNotify int `json:"commentNotify"`
-		AtNotify      int `json:"atNotify"`
-		FollowNotify  int `json:"followNotify"`
-		SystemNotify  int `json:"systemNotify"`
-	}
+	var req types.NotificationSettingsUpdateRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		utils.RespondError(ctx, types.CodeParamError, "参数无效")
+		utils.RespondError(ctx, types.CodeParamError, "参数无效："+err.Error())
 		return
 	}
 
-	if err := c.settingsService.UpdateSettings(userID, req.LikeNotify, req.CommentNotify, req.AtNotify, req.FollowNotify, req.SystemNotify); err != nil {
+	if err := c.settingsService.UpdateSettings(userID, &req); err != nil {
 		utils.RespondError(ctx, types.CodeSystemError, err.Error())
 		return
 	}

@@ -8,6 +8,7 @@ import (
 	"pet-community/cache"
 	"pet-community/model"
 	"pet-community/repository"
+	"pet-community/types"
 	"pet-community/utils"
 )
 
@@ -95,6 +96,7 @@ type MessageService struct {
 	userRepo         *repository.UserRepository
 	blockRepo        *repository.BlockRepository
 	followRepo       *repository.FollowRepository
+	settingsRepo     *repository.NotificationSettingsRepository
 	wsService        *WebSocketService
 }
 
@@ -118,6 +120,11 @@ func (s *MessageService) SetFollowRepository(followRepo *repository.FollowReposi
 
 func (s *MessageService) SetWebSocketService(wsService *WebSocketService) {
 	s.wsService = wsService
+}
+
+// SetNotificationSettingsRepository 注入通知设置仓储，使私信实时推送受 N8-07 开关控制。
+func (s *MessageService) SetNotificationSettingsRepository(settingsRepo *repository.NotificationSettingsRepository) {
+	s.settingsRepo = settingsRepo
 }
 
 // SendMessage 发送纯文本消息（保留旧签名，兼容已有调用方与测试）
@@ -255,7 +262,8 @@ func (s *MessageService) SendMessageWithMedia(fromID, toID uint, content string,
 	}
 	cache.IncrMsgUnread(toID)
 
-	if s.wsService != nil {
+	// N8-07：关闭私信提醒后不推送；消息仍入库、未读计数仍累加（角标不受影响）
+	if s.wsService != nil && NotifyAllowed(s.settingsRepo, toID, "message") {
 		s.wsService.SendMessage(message)
 	}
 
@@ -528,6 +536,7 @@ func (s *NotificationSettingsService) GetSettings(userID uint) (*model.Notificat
 			AtNotify:      1,
 			FollowNotify:  1,
 			SystemNotify:  1,
+			MessageNotify: 1,
 		}
 		if err := s.settingsRepo.Create(settings); err != nil {
 			return nil, err
@@ -537,21 +546,31 @@ func (s *NotificationSettingsService) GetSettings(userID uint) (*model.Notificat
 	return settings, nil
 }
 
-func (s *NotificationSettingsService) UpdateSettings(userID uint, likeNotify, commentNotify, atNotify, followNotify, systemNotify int) error {
+// UpdateSettings 更新通知设置（N8）：req 六个开关全量覆盖。
+func (s *NotificationSettingsService) UpdateSettings(userID uint, req *types.NotificationSettingsUpdateRequest) error {
 	existing, err := s.settingsRepo.GetByUserID(userID)
 	if err != nil {
 		return err
 	}
 
 	if existing == nil {
-		existing = &model.NotificationSettings{UserID: userID}
+		// 行不存在时先落一行默认值再全量覆盖：GORM 对带 default 标签的零值字段
+		// 在 INSERT 时会跳过（落库为默认 1），直接用 req 建行会把「关闭(0)」悄悄写成开启。
+		if err := s.settingsRepo.Create(&model.NotificationSettings{UserID: userID}); err != nil {
+			return err
+		}
+		existing, err = s.settingsRepo.GetByUserID(userID)
+		if err != nil || existing == nil {
+			return errors.New("初始化通知设置失败")
+		}
 	}
 
-	existing.LikeNotify = likeNotify
-	existing.CommentNotify = commentNotify
-	existing.AtNotify = atNotify
-	existing.FollowNotify = followNotify
-	existing.SystemNotify = systemNotify
+	existing.LikeNotify = req.LikeNotify
+	existing.CommentNotify = req.CommentNotify
+	existing.AtNotify = req.AtNotify
+	existing.FollowNotify = req.FollowNotify
+	existing.SystemNotify = req.SystemNotify
+	existing.MessageNotify = req.MessageNotify
 
 	return s.settingsRepo.Update(existing)
 }

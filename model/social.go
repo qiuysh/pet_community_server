@@ -122,6 +122,8 @@ type NotificationSettings struct {
 	AtNotify      int       `gorm:"default:1" json:"atNotify"`
 	FollowNotify  int       `gorm:"default:1" json:"followNotify"`
 	SystemNotify  int       `gorm:"default:1" json:"systemNotify"`
+	// MessageNotify 私信提醒开关（N8-07）：关闭后不做实时推送；消息仍入库并计未读
+	MessageNotify int       `gorm:"default:1" json:"messageNotify"`
 	CreatedAt     time.Time `gorm:"autoCreateTime" json:"createdAt"`
 	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
 }

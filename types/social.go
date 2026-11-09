@@ -14,3 +14,16 @@ type SendMessageRequest struct {
 	// Duration 语音时长（秒），仅 voice 生效
 	Duration int `json:"duration"`
 }
+
+// NotificationSettingsUpdateRequest 更新通知设置请求体（N8）。
+//
+// 六个开关与 model.NotificationSettings 一一对应，取值 0（关闭）/ 1（开启）；
+// 客户端应回传完整开关集（PUT 全量语义），未传字段按 0 落库。
+type NotificationSettingsUpdateRequest struct {
+	LikeNotify    int `json:"likeNotify" binding:"gte=0,lte=1"`
+	CommentNotify int `json:"commentNotify" binding:"gte=0,lte=1"`
+	AtNotify      int `json:"atNotify" binding:"gte=0,lte=1"`
+	FollowNotify  int `json:"followNotify" binding:"gte=0,lte=1"`
+	SystemNotify  int `json:"systemNotify" binding:"gte=0,lte=1"`
+	MessageNotify int `json:"messageNotify" binding:"gte=0,lte=1"`
+}

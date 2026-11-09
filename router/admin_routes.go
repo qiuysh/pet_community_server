@@ -123,6 +123,9 @@ func RegisterAdminRoutes(router *gin.Engine, ac AdminControllers) {
 			adminReviewWrite.POST("/reviews/approve", ac.Review.ApproveReview)
 			adminReviewWrite.POST("/reviews/reject", ac.Review.RejectReview)
 			adminReviewWrite.POST("/reviews/batch", ac.Review.BatchReview)
+			// I7 置顶/精选（管理员）：只对已发布动态生效
+			adminReviewWrite.POST("/posts/:id/pin", ac.Review.PinPost)
+			adminReviewWrite.POST("/posts/:id/feature", ac.Review.FeaturePost)
 		}
 
 		// ===== 举报管理 Ad4: super_admin | content_admin | service =====

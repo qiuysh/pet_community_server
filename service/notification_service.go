@@ -16,6 +16,7 @@ type NotificationService struct {
 	notificationRepo *repository.NotificationRepository
 	followRepo       *repository.FollowRepository
 	userRepo         *repository.UserRepository
+	settingsRepo     *repository.NotificationSettingsRepository
 }
 
 func NewNotificationService(
@@ -30,10 +31,51 @@ func NewNotificationService(
 	}
 }
 
+// SetSettingsRepository 注入通知设置仓储，启用通知开关过滤（N8）。
+func (s *NotificationService) SetSettingsRepository(settingsRepo *repository.NotificationSettingsRepository) {
+	s.settingsRepo = settingsRepo
+}
+
+// NotifyAllowed 判断 userID 是否开启了 kind 对应的通知开关（N8-02~05, N8-07）。
+//
+// kind: like | comment | at | follow | system | message。
+// repo 为 nil（未注入）、读取失败或用户未配置时视为开启——通知是纯副作用，
+// 设置读取异常不应阻断主流程；用户主动关闭（值为 0）才拦截。
+func NotifyAllowed(repo *repository.NotificationSettingsRepository, userID uint, kind string) bool {
+	if repo == nil {
+		return true
+	}
+	settings, err := repo.GetByUserID(userID)
+	if err != nil || settings == nil {
+		return true
+	}
+	var enabled int
+	switch kind {
+	case "like":
+		enabled = settings.LikeNotify
+	case "comment":
+		enabled = settings.CommentNotify
+	case "at":
+		enabled = settings.AtNotify
+	case "follow":
+		enabled = settings.FollowNotify
+	case "system":
+		enabled = settings.SystemNotify
+	case "message":
+		enabled = settings.MessageNotify
+	default:
+		return true
+	}
+	return enabled == 1
+}
+
 // CreateLikeNotification 创建点赞通知
 func (s *NotificationService) CreateLikeNotification(triggerUserID, targetUserID uint, triggerType string, triggerID uint) error {
 	if triggerUserID == targetUserID {
 		return nil // 不通知自己
+	}
+	if !NotifyAllowed(s.settingsRepo, targetUserID, "like") {
+		return nil // 用户已关闭点赞通知（N8-02）
 	}
 
 	triggerUser, _ := s.userRepo.GetByID(triggerUserID)
@@ -65,6 +107,9 @@ func (s *NotificationService) CreateCommentNotification(triggerUserID, targetUse
 	if triggerUserID == targetUserID {
 		return nil
 	}
+	if !NotifyAllowed(s.settingsRepo, targetUserID, "comment") {
+		return nil // 用户已关闭评论通知（N8-03）
+	}
 
 	triggerUser, _ := s.userRepo.GetByID(triggerUserID)
 
@@ -86,6 +131,9 @@ func (s *NotificationService) CreateReplyNotification(triggerUserID, targetUserI
 	if triggerUserID == targetUserID {
 		return nil
 	}
+	if !NotifyAllowed(s.settingsRepo, targetUserID, "comment") {
+		return nil // 回复计入评论通知开关（N8-03）
+	}
 
 	triggerUser, _ := s.userRepo.GetByID(triggerUserID)
 
@@ -106,6 +154,9 @@ func (s *NotificationService) CreateReplyNotification(triggerUserID, targetUserI
 func (s *NotificationService) CreateAtNotification(triggerUserID, targetUserID uint, triggerType string, triggerID uint, content string) error {
 	if triggerUserID == targetUserID {
 		return nil
+	}
+	if !NotifyAllowed(s.settingsRepo, targetUserID, "at") {
+		return nil // 用户已关闭@通知（N8-04）
 	}
 
 	triggerUser, _ := s.userRepo.GetByID(triggerUserID)
@@ -172,6 +223,7 @@ type FollowService struct {
 	followRepo       *repository.FollowRepository
 	userRepo         *repository.UserRepository
 	notificationRepo *repository.NotificationRepository
+	settingsRepo     *repository.NotificationSettingsRepository
 	blockRepo        *repository.BlockRepository
 	pointsService    *PointsService
 	presence         OnlinePresence
@@ -187,6 +239,11 @@ func NewFollowService(
 		userRepo:         userRepo,
 		notificationRepo: notificationRepo,
 	}
+}
+
+// SetNotificationSettingsRepository 注入通知设置仓储，启用关注通知开关过滤（N8-05）。
+func (s *FollowService) SetNotificationSettingsRepository(settingsRepo *repository.NotificationSettingsRepository) {
+	s.settingsRepo = settingsRepo
 }
 
 func (s *FollowService) SetBlockRepository(blockRepo *repository.BlockRepository) {
@@ -261,7 +318,7 @@ func (s *FollowService) ToggleFollow(followerID, followingID uint, isSecret bool
 	}
 
 	// 发送关注通知
-	if s.notificationRepo != nil && !isSecret {
+	if s.notificationRepo != nil && !isSecret && NotifyAllowed(s.settingsRepo, followingID, "follow") {
 		triggerUser, _ := s.userRepo.GetByID(followerID)
 		if triggerUser != nil {
 			notification := &model.UserNotification{

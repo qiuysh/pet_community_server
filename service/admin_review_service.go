@@ -16,11 +16,91 @@ import (
 type AdminReviewService struct {
 	adminRepo *repository.AdminRepository
 	userRepo  *repository.UserRepository
+	postRepo  *repository.PostRepository
 }
 
 // NewAdminReviewService 构造 AdminReviewService。
 func NewAdminReviewService(adminRepo *repository.AdminRepository, userRepo *repository.UserRepository) *AdminReviewService {
 	return &AdminReviewService{adminRepo: adminRepo, userRepo: userRepo}
+}
+
+// SetPostRepository 注入帖子仓储，用于动态置顶/精选（I7）。
+func (s *AdminReviewService) SetPostRepository(postRepo *repository.PostRepository) {
+	s.postRepo = postRepo
+}
+
+// PinPost 置顶/取消置顶动态（I7-01 管理员），并写审计日志。
+//
+// 仅对已发布动态生效；置顶会改变信息流排序（is_pinned 优先），需失效游客缓存与榜单缓存。
+func (s *AdminReviewService) PinPost(postID uint, pinned int, adminID uint, ip string) error {
+	if s.postRepo == nil {
+		return errors.New("post repository not configured")
+	}
+	post, err := s.postRepo.GetByID(postID)
+	if err != nil {
+		return errors.New("动态不存在")
+	}
+	if post.Status != PostStatusPublished {
+		return errors.New("仅可置顶已发布的动态")
+	}
+	if err := s.postRepo.SetPinned(postID, pinned); err != nil {
+		return err
+	}
+	cache.InvalidateGuestFeed()
+	cache.DeleteByPattern("rank:all:*")
+
+	action := "unpin_post"
+	detail := "取消置顶动态: post#" + strconv.FormatUint(uint64(postID), 10)
+	if pinned == 1 {
+		action = "pin_post"
+		detail = "置顶动态: post#" + strconv.FormatUint(uint64(postID), 10)
+	}
+	log := &model.AdminOperationLog{
+		AdminID:    adminID,
+		Action:     action,
+		TargetType: "post",
+		TargetID:   postID,
+		Detail:     detail,
+		IP:         ip,
+	}
+	return s.adminRepo.CreateOperationLog(log)
+}
+
+// FeaturePost 设置/取消精选动态（I7-02 管理员），并写审计日志。
+//
+// 仅对已发布动态生效；精选影响信息流排序（is_featured 优先），需失效游客缓存与榜单缓存。
+func (s *AdminReviewService) FeaturePost(postID uint, featured int, adminID uint, ip string) error {
+	if s.postRepo == nil {
+		return errors.New("post repository not configured")
+	}
+	post, err := s.postRepo.GetByID(postID)
+	if err != nil {
+		return errors.New("动态不存在")
+	}
+	if post.Status != PostStatusPublished {
+		return errors.New("仅可精选已发布的动态")
+	}
+	if err := s.postRepo.SetFeatured(postID, featured); err != nil {
+		return err
+	}
+	cache.InvalidateGuestFeed()
+	cache.DeleteByPattern("rank:all:*")
+
+	action := "unfeature_post"
+	detail := "取消精选动态: post#" + strconv.FormatUint(uint64(postID), 10)
+	if featured == 1 {
+		action = "feature_post"
+		detail = "精选动态: post#" + strconv.FormatUint(uint64(postID), 10)
+	}
+	log := &model.AdminOperationLog{
+		AdminID:    adminID,
+		Action:     action,
+		TargetType: "post",
+		TargetID:   postID,
+		Detail:     detail,
+		IP:         ip,
+	}
+	return s.adminRepo.CreateOperationLog(log)
 }
 
 func (s *AdminReviewService) GetPendingReviews(reviewType string, page, pageSize int) (*types.ReviewListResponse, error) {

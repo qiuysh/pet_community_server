@@ -52,6 +52,8 @@ func main() {
 
 	statsRepo := repository.NewStatsRepository(config.DB)
 	postRepo := repository.NewPostRepository(config.DB)
+	// I7 置顶/精选走内容审核域，注入帖子仓储
+	adminReviewSvc.SetPostRepository(postRepo)
 	likeRepo := repository.NewLikeRepository(config.DB)
 	favoriteRepo := repository.NewFavoriteRepository(config.DB)
 	topicRepo := repository.NewTopicRepository(config.DB)
@@ -146,6 +148,10 @@ func main() {
 	messageService := service.NewMessageService(conversationRepo, messageRepo, userRepo, blockRepo)
 	pointsService := service.NewPointsService(pointsRepo, userLevelRepo, pointsRuleRepo, levelBenefitRepo)
 	notificationSettingsService := service.NewNotificationSettingsService(notificationSettingsRepo)
+	// N8：通知创建侧统一读设置开关过滤
+	notificationService.SetSettingsRepository(notificationSettingsRepo)
+	followService.SetNotificationSettingsRepository(notificationSettingsRepo)
+	adminNotifySvc.SetNotificationSettingsRepository(notificationSettingsRepo)
 
 	discoveryService := service.NewDiscoveryService(
 		postRepo, userRepo, topicRepo, likeRepo, favoriteRepo, petRepo,
@@ -163,6 +169,7 @@ func main() {
 	commentService.SetBlockRepository(blockRepo)
 	commentService.SetFollowRepository(followRepo)
 	messageService.SetFollowRepository(followRepo)
+	messageService.SetNotificationSettingsRepository(notificationSettingsRepo)
 	followService.SetBlockRepository(blockRepo)
 	followService.SetPointsService(pointsService)
 
@@ -213,6 +220,8 @@ func main() {
 	applicationRepo := repository.NewAdoptionApplicationRepository(config.DB)
 	followUpRepo := repository.NewAdoptionFollowUpRepository(config.DB)
 	adoptService := service.NewAdoptService(adoptRepo, applicationRepo, followUpRepo, userRepo)
+	// R6：回访提交后通知对方
+	adoptService.SetNotificationRepository(notificationRepo)
 	adoptController := controller.NewAdoptController(adoptService)
 
 	frontAdController := controller.NewFrontAdController(adService)

@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -18,10 +19,11 @@ import (
 
 // AdoptService 领养服务
 type AdoptService struct {
-	adoptRepo       *repository.AdoptRepository
-	applicationRepo *repository.AdoptionApplicationRepository
-	followUpRepo    *repository.AdoptionFollowUpRepository
-	userRepo        *repository.UserRepository
+	adoptRepo        *repository.AdoptRepository
+	applicationRepo  *repository.AdoptionApplicationRepository
+	followUpRepo     *repository.AdoptionFollowUpRepository
+	userRepo         *repository.UserRepository
+	notificationRepo *repository.NotificationRepository
 }
 
 func NewAdoptService(
@@ -36,6 +38,11 @@ func NewAdoptService(
 		followUpRepo:    followUpRepo,
 		userRepo:        userRepo,
 	}
+}
+
+// SetNotificationRepository 注入通知仓储，用于回访提交后通知对方（R6）。
+func (s *AdoptService) SetNotificationRepository(notificationRepo *repository.NotificationRepository) {
+	s.notificationRepo = notificationRepo
 }
 
 // nullablePetID 把请求里的宠物ID转成可空指针，0 表示未绑定宠物（写库为 NULL）
@@ -655,7 +662,7 @@ func (s *AdoptService) convertToApplicationInfo(application *model.AdoptionAppli
 	}, nil
 }
 
-// CreateFollowUp 创建领养回访记录
+// CreateFollowUp 创建领养回访记录（R6：送养人与领养人双方均可提交，并通知对方）
 func (s *AdoptService) CreateFollowUp(userID uint, req *types.AdoptionFollowUpCreateRequest) (*types.AdoptionFollowUpInfo, error) {
 	// 验证领养信息是否存在
 	adopt, err := s.adoptRepo.GetByID(req.AdoptionID)
@@ -679,8 +686,10 @@ func (s *AdoptService) CreateFollowUp(userID uint, req *types.AdoptionFollowUpCr
 		return nil, errors.New("申请不属于该领养信息")
 	}
 
-	// 只有发布者可以创建回访记录
-	if adopt.UserID != userID {
+	// 当事双方（送养人=发布者 / 领养人=申请通过者）才可创建回访记录
+	isPublisher := adopt.UserID == userID
+	isAdopter := application.UserID == userID
+	if !isPublisher && !isAdopter {
 		return nil, errors.New("无权创建回访记录")
 	}
 
@@ -704,11 +713,64 @@ func (s *AdoptService) CreateFollowUp(userID uint, req *types.AdoptionFollowUpCr
 		return nil, err
 	}
 
+	// 纯副作用：通知失败不阻断回访提交
+	s.notifyFollowUpCounterpart(userID, adopt, application)
+
 	return s.convertToFollowUpInfo(followUp)
 }
 
-// ListFollowUpsByAdoption 获取领养回访记录列表
-func (s *AdoptService) ListFollowUpsByAdoption(adoptionID uint, page, pageSize int) (*types.AdoptionFollowUpListResponse, error) {
+// notifyFollowUpCounterpart 回访提交后通知另一方：领养人提交 → 通知送养人；送养人提交 → 通知领养人。
+func (s *AdoptService) notifyFollowUpCounterpart(submitterID uint, adopt *model.Adopt, application *model.AdoptionApplication) {
+	if s.notificationRepo == nil {
+		return
+	}
+	targetID := uint(0)
+	if submitterID == application.UserID {
+		targetID = adopt.UserID // 领养人提交，通知送养人
+	} else {
+		targetID = application.UserID // 送养人提交，通知领养人
+	}
+	if targetID == 0 || targetID == submitterID {
+		return
+	}
+	submitter, _ := s.userRepo.GetByID(submitterID)
+	if submitter == nil {
+		return
+	}
+	notification := &model.UserNotification{
+		UserID:        targetID,
+		Type:          "system",
+		Title:         "回访提醒",
+		Content:       fmt.Sprintf("%s 提交了一条领养回访记录", submitter.Nickname),
+		TriggerType:   "adopt",
+		TriggerID:     adopt.ID,
+		TriggerUserID: submitterID,
+	}
+	if err := s.notificationRepo.Create(notification); err != nil {
+		utils.LogError(err, "notify adoption follow-up failed")
+	}
+}
+
+// ListFollowUpsByAdoption 获取领养回访记录列表（R6：仅当事双方可见）
+func (s *AdoptService) ListFollowUpsByAdoption(viewerID, adoptionID uint, page, pageSize int) (*types.AdoptionFollowUpListResponse, error) {
+	// 非当事双方（送养人 / 已通过申请的领养人）不可见
+	adopt, err := s.adoptRepo.GetByID(adoptionID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("领养信息不存在")
+		}
+		return nil, err
+	}
+	allowed := adopt.UserID == viewerID
+	if !allowed && viewerID > 0 {
+		if application, err := s.applicationRepo.GetByAdoptionAndUser(adoptionID, viewerID); err == nil && application != nil {
+			allowed = application.Status == 1
+		}
+	}
+	if !allowed {
+		return nil, errors.New("无权查看回访记录")
+	}
+
 	if page <= 0 {
 		page = 1
 	}
