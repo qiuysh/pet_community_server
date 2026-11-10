@@ -135,12 +135,14 @@ CREATE TABLE IF NOT EXISTS pets (
     tags VARCHAR(255) COMMENT '标签（JSON数组）',
     description VARCHAR(200) COMMENT '描述',
     status TINYINT DEFAULT 1 COMMENT '状态（0-正常，1-生病，2-走失，3-去世）',
+    visibility TINYINT NOT NULL DEFAULT 0 COMMENT '可见范围：0公开 1仅粉丝 2仅自己',
     view_count INT DEFAULT 0 COMMENT '浏览次数',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     INDEX idx_pets_user_id (user_id),
     INDEX idx_pets_status (status),
     INDEX idx_pets_pet_type (pet_type),
+    INDEX idx_pets_visibility (visibility),
     -- breed_id 用 0 作为「未选品种」的哨兵值（Pet.BreedID 为 uint，ORM 零值即 0），
     -- 因此不能加外键：0 不存在于 pet_breeds(id)，创建宠物不选品种时会报 1452；
     -- 品种有效性由 PetService 在 BreedID > 0 时调用 GetBreedByID 校验，项目暂无删除品种的功能。

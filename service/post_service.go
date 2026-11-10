@@ -358,7 +358,7 @@ func (s *PostService) ListPosts(viewerID, authorID, topicID, petID uint, postTyp
 	for i := range postInfos {
 		postInfos[i].IsLiked = likeMap[postInfos[i].ID]
 		postInfos[i].IsFavorited = favMap[postInfos[i].ID]
-		s.enrichPostInfoBasic(&postInfos[i])
+		s.enrichPostInfoBasic(viewerID, &postInfos[i])
 	}
 
 	return &types.PostListResponse{
@@ -402,7 +402,7 @@ func (s *PostService) GetLikedPosts(userID uint, page, pageSize int) (*types.Pos
 	}
 	for i := range postInfos {
 		postInfos[i].IsFavorited = favMap[postInfos[i].ID]
-		s.enrichPostInfoBasic(&postInfos[i])
+		s.enrichPostInfoBasic(userID, &postInfos[i])
 	}
 
 	return &types.PostListResponse{
@@ -572,7 +572,7 @@ func (s *PostService) GetFavorites(userID uint, page, pageSize int) (*types.Post
 			if err == nil && post.Status == 1 {
 				info := s.convertToPostInfo(post)
 				info.IsFavorited = true
-				s.enrichPostInfoBasic(info)
+				s.enrichPostInfoBasic(userID, info)
 				postInfos = append(postInfos, *info)
 			}
 		}
@@ -742,7 +742,7 @@ func (s *PostService) convertToPostInfo(post *model.Post) *types.PostInfo {
 }
 
 func (s *PostService) enrichPostInfo(userID uint, info *types.PostInfo) {
-	s.enrichPostInfoBasic(info)
+	s.enrichPostInfoBasic(userID, info)
 
 	if userID > 0 {
 		isLiked, _ := s.likeRepo.Exists(userID, "post", info.ID)
@@ -752,7 +752,7 @@ func (s *PostService) enrichPostInfo(userID uint, info *types.PostInfo) {
 	}
 }
 
-func (s *PostService) enrichPostInfoBasic(info *types.PostInfo) {
+func (s *PostService) enrichPostInfoBasic(viewerID uint, info *types.PostInfo) {
 	user, err := s.userRepo.GetByID(info.UserID)
 	if err == nil {
 		info.UserNickname = user.Nickname
@@ -781,13 +781,25 @@ func (s *PostService) enrichPostInfoBasic(info *types.PostInfo) {
 		var petInfos []types.PetInfo
 		for _, petID := range info.PetIDs {
 			pet, err := s.petRepo.GetByID(petID)
-			if err == nil {
+			if err != nil {
+				continue
+			}
+			isFollower := false
+			if s.followRepo != nil && viewerID > 0 {
+				isFollower, _ = s.followRepo.ExistsPublic(viewerID, pet.UserID)
+			}
+			if CanViewPost(viewerID, pet.UserID, pet.Visibility, isFollower) {
+				accessible := true
 				petInfos = append(petInfos, types.PetInfo{
-					ID:     pet.ID,
-					UserID: pet.UserID,
-					Name:   pet.Name,
-					Avatar: pet.Avatar,
+					ID:         pet.ID,
+					UserID:     pet.UserID,
+					Name:       pet.Name,
+					Avatar:     pet.Avatar,
+					Visibility: pet.Visibility,
+					Accessible: &accessible,
 				})
+			} else {
+				petInfos = append(petInfos, HiddenPetInfo(pet.ID))
 			}
 		}
 		info.Pets = petInfos

@@ -229,7 +229,11 @@ func (s *UserService) GetPublicProfile(userID uint, viewerID uint) (*types.Publi
 		followingCount, _ = s.followRepo.GetFollowingCount(userID)
 	}
 	if s.petRepo != nil {
-		petsCount, _ = s.petRepo.CountByUser(userID)
+		var followingIDs []uint
+		if s.followRepo != nil && viewerID > 0 && viewerID != userID {
+			followingIDs, _ = s.followRepo.GetPublicFollowingIDs(viewerID)
+		}
+		petsCount, _ = s.petRepo.CountVisibleByUser(userID, viewerID, followingIDs)
 	}
 
 	lv := userLevelOf(user.ID)

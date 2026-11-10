@@ -12,14 +12,47 @@ import (
 )
 
 type PetService struct {
-	petRepo *repository.PetRepository
+	petRepo    *repository.PetRepository
+	followRepo *repository.FollowRepository
 }
 
 func NewPetService(petRepo *repository.PetRepository) *PetService {
 	return &PetService{petRepo: petRepo}
 }
 
+// SetFollowRepository R5：粉丝可见性依赖普通关注关系
+func (s *PetService) SetFollowRepository(followRepo *repository.FollowRepository) {
+	s.followRepo = followRepo
+}
+
+func (s *PetService) isPublicFollower(viewerID, ownerID uint) bool {
+	if s.followRepo == nil || viewerID == 0 || ownerID == 0 {
+		return false
+	}
+	ok, err := s.followRepo.ExistsPublic(viewerID, ownerID)
+	return err == nil && ok
+}
+
+func (s *PetService) canViewPet(viewerID uint, pet *model.Pet) bool {
+	return CanViewPost(viewerID, pet.UserID, pet.Visibility, s.isPublicFollower(viewerID, pet.UserID))
+}
+
+func (s *PetService) publicFollowingIDs(viewerID uint) []uint {
+	if s.followRepo == nil || viewerID == 0 {
+		return nil
+	}
+	ids, err := s.followRepo.GetPublicFollowingIDs(viewerID)
+	if err != nil {
+		return nil
+	}
+	return ids
+}
+
 func (s *PetService) CreatePet(userID uint, req *types.PetCreateRequest) (*types.PetInfo, error) {
+	visibility := VisibilityPublic
+	if req.Visibility != nil {
+		visibility = *req.Visibility
+	}
 	pet := &model.Pet{
 		UserID:       userID,
 		Name:         FilterSensitiveText(req.Name),
@@ -35,6 +68,7 @@ func (s *PetService) CreatePet(userID uint, req *types.PetCreateRequest) (*types
 		IsSterilized: req.IsSterilized,
 		IsVaccinated: req.IsVaccinated,
 		Status:       1,
+		Visibility:   visibility,
 	}
 
 	if req.BreedID > 0 && req.BreedName == "" {
@@ -107,6 +141,9 @@ func (s *PetService) UpdatePet(userID uint, petID uint, req *types.PetUpdateRequ
 	if req.Status >= 0 {
 		pet.Status = req.Status
 	}
+	if req.Visibility != nil {
+		pet.Visibility = *req.Visibility
+	}
 
 	if err := s.petRepo.Update(pet); err != nil {
 		return nil, err
@@ -115,15 +152,31 @@ func (s *PetService) UpdatePet(userID uint, petID uint, req *types.PetUpdateRequ
 	return convertToPetInfo(pet), nil
 }
 
-func (s *PetService) GetPetByID(id uint) (*types.PetInfo, error) {
+func (s *PetService) GetPetByID(id, viewerID uint) (*types.PetInfo, error) {
 	pet, err := s.petRepo.GetByID(id)
 	if err != nil {
+		return nil, errors.New("宠物不存在")
+	}
+	// 越权不泄露存在性：统一「宠物不存在」
+	if !s.canViewPet(viewerID, pet) {
 		return nil, errors.New("宠物不存在")
 	}
 
 	go s.petRepo.IncrementViewCount(id)
 
 	return convertToPetInfo(pet), nil
+}
+
+// EnsurePetAccessible 相册/成长等子资源读取前校验可见性（不可见 → 同「不存在」）
+func (s *PetService) EnsurePetAccessible(petID, viewerID uint) error {
+	pet, err := s.petRepo.GetByID(petID)
+	if err != nil {
+		return errors.New("宠物不存在")
+	}
+	if !s.canViewPet(viewerID, pet) {
+		return errors.New("宠物不存在")
+	}
+	return nil
 }
 
 func (s *PetService) DeletePet(userID uint, petID uint) error {
@@ -152,7 +205,7 @@ func (s *PetService) GetUserPets(userID uint) ([]types.PetInfo, error) {
 	return result, nil
 }
 
-func (s *PetService) ListPets(req *types.PetListRequest) (*types.PetListResponse, error) {
+func (s *PetService) ListPets(req *types.PetListRequest, viewerID uint) (*types.PetListResponse, error) {
 	page := req.Page
 	if page <= 0 {
 		page = 1
@@ -162,7 +215,7 @@ func (s *PetService) ListPets(req *types.PetListRequest) (*types.PetListResponse
 		pageSize = 20
 	}
 
-	pets, total, err := s.petRepo.List(req.UserID, req.PetType, req.Keyword, page, pageSize)
+	pets, total, err := s.petRepo.List(req.UserID, req.PetType, req.Keyword, page, pageSize, viewerID, s.publicFollowingIDs(viewerID))
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +339,10 @@ func (s *PetService) AddAlbumPhoto(userID, petID uint, req *types.PetAlbumCreate
 	return toAlbumInfo(photo), nil
 }
 
-func (s *PetService) GetPetAlbum(petID uint) ([]types.PetAlbumInfo, error) {
+func (s *PetService) GetPetAlbum(petID, viewerID uint) ([]types.PetAlbumInfo, error) {
+	if err := s.EnsurePetAccessible(petID, viewerID); err != nil {
+		return nil, err
+	}
 	photos, err := s.petRepo.GetPetAlbum(petID)
 	if err != nil {
 		return nil, err
@@ -460,7 +516,10 @@ func (s *PetService) DeleteGrowthRecord(userID, petID, recordID uint) error {
 	return s.petRepo.DeleteGrowthRecord(recordID, petID)
 }
 
-func (s *PetService) GetGrowthRecords(petID uint, page, pageSize int) ([]types.PetGrowthRecordInfo, int64, error) {
+func (s *PetService) GetGrowthRecords(petID, viewerID uint, page, pageSize int) ([]types.PetGrowthRecordInfo, int64, error) {
+	if err := s.EnsurePetAccessible(petID, viewerID); err != nil {
+		return nil, 0, err
+	}
 	if page <= 0 {
 		page = 1
 	}
@@ -595,6 +654,7 @@ func (s *PetService) UpdateLostPetStatus(userID, id uint, status int) error {
 }
 
 func convertToPetInfo(pet *model.Pet) *types.PetInfo {
+	accessible := true
 	return &types.PetInfo{
 		ID:           pet.ID,
 		UserID:       pet.UserID,
@@ -611,8 +671,20 @@ func convertToPetInfo(pet *model.Pet) *types.PetInfo {
 		IsSterilized: pet.IsSterilized,
 		IsVaccinated: pet.IsVaccinated,
 		Status:       pet.Status,
+		Visibility:   pet.Visibility,
+		Accessible:   &accessible,
 		ViewCount:    pet.ViewCount,
 		CreatedAt:    pet.CreatedAt.Format("2006-01-02 15:04:05"),
+	}
+}
+
+// HiddenPetInfo 帖子关联宠物对查看者不可见时的降级卡片
+func HiddenPetInfo(petID uint) types.PetInfo {
+	accessible := false
+	return types.PetInfo{
+		ID:         petID,
+		Name:       "宠物信息不可见",
+		Accessible: &accessible,
 	}
 }
 

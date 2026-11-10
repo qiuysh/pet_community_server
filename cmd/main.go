@@ -109,6 +109,7 @@ func main() {
 	draftRepo := repository.NewDraftRepository(config.DB)
 	notificationRepo := repository.NewNotificationRepository(config.DB)
 	followRepo := repository.NewFollowRepository(config.DB)
+	petService.SetFollowRepository(followRepo)
 	userService.SetProfileRepos(followRepo, postRepo, petRepo)
 
 	notificationService := service.NewNotificationService(notificationRepo, followRepo, userRepo)

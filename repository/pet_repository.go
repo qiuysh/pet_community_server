@@ -34,13 +34,34 @@ func (r *PetRepository) Delete(id uint) error {
 	return r.db.Delete(&model.Pet{}, id).Error
 }
 
-func (r *PetRepository) List(userID uint, petType int, keyword string, page, pageSize int) ([]model.Pet, int64, error) {
+// ApplyPetVisibilityFilter 统一可见性条件（R5）：公开 / 主人本人 / 仅粉丝且 viewer 普通关注主人。
+// followingOwnerIDs = viewer 正在普通关注的 user_id 列表。
+func ApplyPetVisibilityFilter(query *gorm.DB, viewerID uint, followingOwnerIDs []uint) *gorm.DB {
+	if viewerID == 0 {
+		return query.Where("visibility = ?", 0)
+	}
+	if len(followingOwnerIDs) == 0 {
+		return query.Where("visibility = ? OR user_id = ?", 0, viewerID)
+	}
+	return query.Where(
+		"visibility = ? OR user_id = ? OR (visibility = ? AND user_id IN ?)",
+		0, viewerID, 1, followingOwnerIDs,
+	)
+}
+
+func (r *PetRepository) List(userID uint, petType int, keyword string, page, pageSize int, viewerID uint, followingOwnerIDs []uint) ([]model.Pet, int64, error) {
 	var pets []model.Pet
 	var total int64
 	query := r.db.Model(&model.Pet{}).Where("status = 1")
 
 	if userID > 0 {
 		query = query.Where("user_id = ?", userID)
+		// 主人看自己的档案：不过滤可见性
+		if userID != viewerID {
+			query = ApplyPetVisibilityFilter(query, viewerID, followingOwnerIDs)
+		}
+	} else {
+		query = ApplyPetVisibilityFilter(query, viewerID, followingOwnerIDs)
 	}
 	if petType > 0 {
 		query = query.Where("pet_type = ?", petType)
@@ -60,10 +81,20 @@ func (r *PetRepository) List(userID uint, petType int, keyword string, page, pag
 	return pets, total, nil
 }
 
-// CountByUser 统计用户有效宠物数
+// CountByUser 统计用户有效宠物数（主人视角：含全部可见性）
 func (r *PetRepository) CountByUser(userID uint) (int64, error) {
 	var count int64
 	return count, r.db.Model(&model.Pet{}).Where("user_id = ? AND status = 1", userID).Count(&count).Error
+}
+
+// CountVisibleByUser 统计对 viewer 可见的有效宠物数（R5）
+func (r *PetRepository) CountVisibleByUser(ownerID, viewerID uint, followingOwnerIDs []uint) (int64, error) {
+	var count int64
+	query := r.db.Model(&model.Pet{}).Where("user_id = ? AND status = 1", ownerID)
+	if ownerID != viewerID {
+		query = ApplyPetVisibilityFilter(query, viewerID, followingOwnerIDs)
+	}
+	return count, query.Count(&count).Error
 }
 
 func (r *PetRepository) GetUserPets(userID uint) ([]model.Pet, error) {
