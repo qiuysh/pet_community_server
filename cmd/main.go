@@ -153,6 +153,8 @@ func main() {
 	notificationService.SetSettingsRepository(notificationSettingsRepo)
 	followService.SetNotificationSettingsRepository(notificationSettingsRepo)
 	adminNotifySvc.SetNotificationSettingsRepository(notificationSettingsRepo)
+	// R4：登录登记未知设备时写安全通知
+	userService.SetNotificationService(notificationService)
 
 	discoveryService := service.NewDiscoveryService(
 		postRepo, userRepo, topicRepo, likeRepo, favoriteRepo, petRepo,

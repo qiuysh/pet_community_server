@@ -40,12 +40,12 @@ func TestAdminLoginLockout(t *testing.T) {
 	}
 
 	for i := 0; i < 5; i++ {
-		_, _, err := srv.Login("lockme", "wrong", "127.0.0.1", "test")
+		_, _, err := srv.Login("lockme", "wrong", "127.0.0.1", "test", "", "")
 		if err == nil {
 			t.Fatalf("expected failure on attempt %d", i+1)
 		}
 	}
-	_, _, err = srv.Login("lockme", "Pass1234", "127.0.0.1", "test")
+	_, _, err = srv.Login("lockme", "Pass1234", "127.0.0.1", "test", "", "")
 	if err == nil || err.Error() != "登录失败次数过多，请30分钟后再试" {
 		t.Fatalf("expected lockout, got %v", err)
 	}

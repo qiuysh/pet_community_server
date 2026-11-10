@@ -28,10 +28,11 @@ type AdminControllers struct {
 // 原:全部路由只挂 AuthMiddleware() 只认证不鉴权,B3 RBAC 是死代码。
 // 现:AuthMiddleware + 按域 RequireRole(...),role.go 从死代码变活代码。
 func RegisterAdminRoutes(router *gin.Engine, ac AdminControllers) {
-	// ===== 公开: 登录 + 健康检查 =====
+	// ===== 公开: 登录 + 验证码 + 健康检查 =====
 	adminPublic := router.Group("/api/v1/admin")
 	{
 		adminPublic.POST("/login", ac.Auth.Login)
+		adminPublic.GET("/captcha", ac.Auth.GetCaptcha)
 	}
 
 	// ===== 受保护基类: 所有 admin 必须先过 AuthMiddleware(认证) =====

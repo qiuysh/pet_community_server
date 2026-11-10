@@ -2,10 +2,15 @@ package service
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
+	"strings"
 	"time"
+
+	"pet-community/config"
 )
 
 // QRCodeService 二维码服务
@@ -13,10 +18,32 @@ type QRCodeService struct {
 	secretKey string // 用于签名验证的密钥
 }
 
+// NewQRCodeService 从 config.yaml 的 qrcode.secret 读取密钥；
+// 留空则启动时随机生成并告警（进程重启后旧码失效，生产务必配置）。
 func NewQRCodeService() *QRCodeService {
-	return &QRCodeService{
-		secretKey: "pet-community-qrcode-secret-2026",
+	secret := ""
+	if config.Cfg != nil {
+		secret = strings.TrimSpace(config.Cfg.QRCode.Secret)
 	}
+	if secret == "" {
+		secret = randomQRCodeSecret()
+		log.Printf("WARN qrcode.secret is empty; using ephemeral key (restart invalidates active check-in codes). Set qrcode.secret in config.yaml")
+	}
+	return &QRCodeService{secretKey: secret}
+}
+
+// NewQRCodeServiceWithSecret 测试用：注入固定密钥
+func NewQRCodeServiceWithSecret(secret string) *QRCodeService {
+	return &QRCodeService{secretKey: secret}
+}
+
+func randomQRCodeSecret() string {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		// 极端情况下退回时间戳派生，仍会打告警；正常路径不会走到这里
+		return fmt.Sprintf("ephemeral-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
 }
 
 // GenerateQRCode 生成二维码内容
@@ -58,10 +85,10 @@ func (s *QRCodeService) ValidateQRCode(qrCode string) (uint, error) {
 		return 0, fmt.Errorf("二维码已过期")
 	}
 
-	// 验证签名
+	// 验证签名（恒定时间比较，避免计时旁路）
 	data := fmt.Sprintf("%d-%d", activityID, expires)
 	expectedSignature := s.generateSignature(data)
-	if signature != expectedSignature {
+	if !hmac.Equal([]byte(signature), []byte(expectedSignature)) {
 		return 0, fmt.Errorf("二维码签名无效")
 	}
 

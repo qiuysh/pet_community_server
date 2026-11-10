@@ -38,7 +38,7 @@ func (s *NotificationService) SetSettingsRepository(settingsRepo *repository.Not
 
 // NotifyAllowed 判断 userID 是否开启了 kind 对应的通知开关（N8-02~05, N8-07）。
 //
-// kind: like | comment | at | follow | system | message。
+// kind: like | comment | at | follow | system | message | security。
 // repo 为 nil（未注入）、读取失败或用户未配置时视为开启——通知是纯副作用，
 // 设置读取异常不应阻断主流程；用户主动关闭（值为 0）才拦截。
 func NotifyAllowed(repo *repository.NotificationSettingsRepository, userID uint, kind string) bool {
@@ -63,10 +63,41 @@ func NotifyAllowed(repo *repository.NotificationSettingsRepository, userID uint,
 		enabled = settings.SystemNotify
 	case "message":
 		enabled = settings.MessageNotify
+	case "security":
+		enabled = settings.SecurityNotify
 	default:
 		return true
 	}
 	return enabled == 1
+}
+
+// CreateNewDeviceLoginNotification R4：新设备登录站内通知（类型 security）。
+// IP 归属地无本地库时降级为「归属地未知」；deviceName 空则「未知设备」。
+func (s *NotificationService) CreateNewDeviceLoginNotification(userID uint, deviceName, ip string) error {
+	if !NotifyAllowed(s.settingsRepo, userID, "security") {
+		return nil
+	}
+	if strings.TrimSpace(deviceName) == "" {
+		deviceName = "未知设备"
+	}
+	ipText := strings.TrimSpace(ip)
+	if ipText == "" {
+		ipText = "未知 IP"
+	}
+	content := fmt.Sprintf(
+		"设备：%s；IP：%s（归属地未知）；时间：%s",
+		deviceName,
+		ipText,
+		time.Now().Format("2006-01-02 15:04:05"),
+	)
+	notification := &model.UserNotification{
+		UserID:      userID,
+		Type:        "security",
+		Title:       "新设备登录",
+		Content:     content,
+		TriggerType: "security",
+	}
+	return s.notificationRepo.Create(notification)
 }
 
 // CreateLikeNotification 创建点赞通知

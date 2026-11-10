@@ -438,6 +438,7 @@ CREATE TABLE IF NOT EXISTS notification_settings (
     follow_notify TINYINT DEFAULT 1 COMMENT '关注通知（0-关闭，1-开启）',
     system_notify TINYINT DEFAULT 1 COMMENT '系统通知（0-关闭，1-开启）',
     message_notify TINYINT DEFAULT 1 COMMENT '私信提醒（0-关闭实时推送，1-开启；消息仍入库并计未读）',
+    security_notify TINYINT DEFAULT 1 COMMENT '安全提醒（0-关闭新设备登录通知，1-开启）',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     -- 唯一索引名与 model.NotificationSettings uniqueIndex 对齐，勿再额外建同名非唯一 INDEX

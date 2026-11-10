@@ -140,6 +140,72 @@ func TestUserServiceLogin(t *testing.T) {
 	})
 }
 
+func TestUserServiceNewDeviceLoginNotification(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+
+	userRepo := repository.NewUserRepository(db)
+	notificationRepo := repository.NewNotificationRepository(db)
+	settingsRepo := repository.NewNotificationSettingsRepository(db)
+	srv := service.NewUserService(userRepo)
+	notifySvc := service.NewNotificationService(notificationRepo, nil, userRepo)
+	notifySvc.SetSettingsRepository(settingsRepo)
+	srv.SetNotificationService(notifySvc)
+
+	hashedPassword, _ := utils.HashPassword("Pass1234")
+	user := &model.User{
+		Phone:    "13900139000",
+		Password: string(hashedPassword),
+		Nickname: "device-user",
+		Status:   1,
+	}
+	db.Create(user)
+
+	req := &types.UserLoginRequest{
+		Account:   "13900139000",
+		Password:  "Pass1234",
+		LoginType: "password",
+	}
+
+	t.Run("first login creates security notification", func(t *testing.T) {
+		if _, err := srv.Login(req, "10.0.0.1", "Device-A"); err != nil {
+			t.Fatalf("login failed: %v", err)
+		}
+		var count int64
+		db.Model(&model.UserNotification{}).Where("user_id = ? AND type = ?", user.ID, "security").Count(&count)
+		if count != 1 {
+			t.Fatalf("expected 1 security notification, got %d", count)
+		}
+	})
+
+	t.Run("same device second login does not notify again", func(t *testing.T) {
+		if _, err := srv.Login(req, "10.0.0.1", "Device-A"); err != nil {
+			t.Fatalf("login failed: %v", err)
+		}
+		var count int64
+		db.Model(&model.UserNotification{}).Where("user_id = ? AND type = ?", user.ID, "security").Count(&count)
+		if count != 1 {
+			t.Fatalf("expected still 1 security notification, got %d", count)
+		}
+	})
+
+	t.Run("security switch off blocks notify", func(t *testing.T) {
+		settingsSvc := service.NewNotificationSettingsService(settingsRepo)
+		if err := settingsSvc.UpdateSettings(user.ID, &types.NotificationSettingsUpdateRequest{
+			LikeNotify: 1, CommentNotify: 1, AtNotify: 1, FollowNotify: 1, SystemNotify: 1, MessageNotify: 1, SecurityNotify: 0,
+		}); err != nil {
+			t.Fatalf("update settings: %v", err)
+		}
+		if _, err := srv.Login(req, "10.0.0.2", "Device-B"); err != nil {
+			t.Fatalf("login failed: %v", err)
+		}
+		var count int64
+		db.Model(&model.UserNotification{}).Where("user_id = ? AND type = ?", user.ID, "security").Count(&count)
+		if count != 1 {
+			t.Fatalf("expected still 1 after switch off, got %d", count)
+		}
+	})
+}
+
 func TestUserServiceChangePassword(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 

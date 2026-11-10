@@ -22,11 +22,12 @@ import (
 )
 
 type UserService struct {
-	userRepo   *repository.UserRepository
-	followRepo *repository.FollowRepository
-	postRepo   *repository.PostRepository
-	petRepo    *repository.PetRepository
-	blockRepo  *repository.BlockRepository
+	userRepo            *repository.UserRepository
+	followRepo          *repository.FollowRepository
+	postRepo            *repository.PostRepository
+	petRepo             *repository.PetRepository
+	blockRepo           *repository.BlockRepository
+	notificationService *NotificationService
 }
 
 func NewUserService(userRepo *repository.UserRepository) *UserService {
@@ -42,6 +43,49 @@ func (s *UserService) SetProfileRepos(followRepo *repository.FollowRepository, p
 
 func (s *UserService) SetBlockRepository(blockRepo *repository.BlockRepository) {
 	s.blockRepo = blockRepo
+}
+
+// SetNotificationService 注入通知服务，用于 R4 新设备登录提醒（失败不阻断登录）
+func (s *UserService) SetNotificationService(notificationService *NotificationService) {
+	s.notificationService = notificationService
+}
+
+// registerLoginDevice 登记/刷新登录设备；未知 device_id 时发安全通知。
+// 设备写入失败只记日志，不阻断登录。
+func (s *UserService) registerLoginDevice(userID uint, ip, userAgent string) string {
+	deviceID := generateDeviceID(userAgent, ip)
+	deviceName := truncateString(userAgent, 100)
+	if deviceName == "" {
+		deviceName = "未知设备"
+	}
+
+	isNew := false
+	exists, err := s.userRepo.DeviceExists(userID, deviceID)
+	if err != nil {
+		utils.LogError(err, "UserService.registerLoginDevice.DeviceExists")
+	} else {
+		isNew = !exists
+	}
+
+	if err := s.userRepo.AddDevice(&model.UserDevice{
+		UserID:       userID,
+		DeviceID:     deviceID,
+		DeviceName:   deviceName,
+		DeviceType:   "web",
+		IP:           ip,
+		LastActiveAt: time.Now(),
+	}); err != nil {
+		utils.LogError(err, "UserService.registerLoginDevice.AddDevice")
+	}
+
+	if isNew && s.notificationService != nil {
+		if nerr := s.notificationService.CreateNewDeviceLoginNotification(userID, deviceName, ip); nerr != nil {
+			utils.LogError(nerr, "UserService.registerLoginDevice.notify")
+		}
+	}
+
+	cache.CacheDevice(userID, deviceID)
+	return deviceID
 }
 
 func (s *UserService) Register(req *types.UserRegisterRequest, ip string) (*types.UserInfo, error) {
@@ -135,18 +179,8 @@ func (s *UserService) Login(req *types.UserLoginRequest, ip, userAgent string) (
 
 	s.userRepo.UpdateLoginInfo(user.ID, ip)
 
-	deviceID := generateDeviceID(userAgent, ip)
-	device := truncateString(userAgent, 100)
-	s.userRepo.AddDevice(&model.UserDevice{
-		UserID:       user.ID,
-		DeviceID:     deviceID,
-		DeviceName:   device,
-		DeviceType:   "web",
-		IP:           ip,
-		LastActiveAt: time.Now(),
-	})
+	deviceID := s.registerLoginDevice(user.ID, ip, userAgent)
 	cache.SetSessionMeta(user.ID, user.Status, user.TokenVersion)
-	cache.CacheDevice(user.ID, deviceID)
 
 	token, refreshToken, err := GenerateUserToken(user.ID, user.TokenVersion, deviceID, req.Remember)
 	if err != nil {
@@ -517,11 +551,7 @@ func (s *UserService) ThirdPartyLogin(req *types.ThirdPartyLoginRequest, ip, use
 		}
 
 		s.userRepo.UpdateLoginInfo(user.ID, ip)
-		deviceID := generateDeviceID(userAgent, ip)
-		s.userRepo.AddDevice(&model.UserDevice{
-			UserID: user.ID, DeviceID: deviceID, DeviceName: truncateString(userAgent, 100),
-			DeviceType: "web", IP: ip, LastActiveAt: time.Now(),
-		})
+		deviceID := s.registerLoginDevice(user.ID, ip, userAgent)
 		token, refreshToken, err := GenerateUserToken(user.ID, user.TokenVersion, deviceID, true)
 		if err != nil {
 			return nil, err
@@ -564,11 +594,7 @@ func (s *UserService) ThirdPartyLogin(req *types.ThirdPartyLoginRequest, ip, use
 	}
 
 	s.userRepo.UpdateLoginInfo(user.ID, ip)
-	deviceID := generateDeviceID(userAgent, ip)
-	s.userRepo.AddDevice(&model.UserDevice{
-		UserID: user.ID, DeviceID: deviceID, DeviceName: truncateString(userAgent, 100),
-		DeviceType: "web", IP: ip, LastActiveAt: time.Now(),
-	})
+	deviceID := s.registerLoginDevice(user.ID, ip, userAgent)
 	token, refreshToken, err := GenerateUserToken(user.ID, user.TokenVersion, deviceID, true)
 	if err != nil {
 		return nil, err

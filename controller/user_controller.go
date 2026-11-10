@@ -50,7 +50,8 @@ func (c *UserController) Login(ctx *gin.Context) {
 
 	resp, err := c.userService.Login(&req, ip, userAgent)
 	if err != nil {
-		utils.RespondError(ctx, types.CodeUnauthorized, err.Error())
+		// 凭据错误是业务失败，勿用 HTTP 401（前端会走 refresh / 清会话）
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
 		return
 	}
 
@@ -299,7 +300,7 @@ func (c *UserController) ThirdPartyLogin(ctx *gin.Context) {
 
 	resp, err := c.userService.ThirdPartyLogin(&req, ip, userAgent)
 	if err != nil {
-		utils.RespondError(ctx, types.CodeUnauthorized, err.Error())
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
 		return
 	}
 

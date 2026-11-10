@@ -22,6 +22,13 @@ type Config struct {
 	Storage    StorageConfig    `yaml:"storage"`
 	Admin      AdminConfig      `yaml:"admin"`
 	ThirdParty ThirdPartyConfig `yaml:"third_party"`
+	QRCode     QRCodeConfig     `yaml:"qrcode"`
+}
+
+// QRCodeConfig 活动签到二维码 HMAC 签名配置
+type QRCodeConfig struct {
+	// Secret 签到码签名密钥；留空则启动时随机生成并告警（重启会使旧码失效）
+	Secret string `yaml:"secret"`
 }
 
 // ThirdPartyConfig 第三方登录（微信 / 微博 / QQ）配置。

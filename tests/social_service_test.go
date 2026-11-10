@@ -371,16 +371,20 @@ func TestNotificationSettingsService(t *testing.T) {
 		if settings.MessageNotify != 1 {
 			t.Errorf("expected message notify 1, got %d", settings.MessageNotify)
 		}
+		if settings.SecurityNotify != 1 {
+			t.Errorf("expected security notify 1, got %d", settings.SecurityNotify)
+		}
 	})
 
 	t.Run("update", func(t *testing.T) {
 		err := srv.UpdateSettings(1, &types.NotificationSettingsUpdateRequest{
-			LikeNotify:    0,
-			CommentNotify: 0,
-			AtNotify:      0,
-			FollowNotify:  0,
-			SystemNotify:  0,
-			MessageNotify: 1,
+			LikeNotify:     0,
+			CommentNotify:  0,
+			AtNotify:       0,
+			FollowNotify:   0,
+			SystemNotify:   0,
+			MessageNotify:  1,
+			SecurityNotify: 1,
 		})
 		if err != nil {
 			t.Fatalf("update settings failed: %v", err)
@@ -391,6 +395,9 @@ func TestNotificationSettingsService(t *testing.T) {
 		}
 		if settings.MessageNotify != 1 {
 			t.Errorf("expected message notify 1, got %d", settings.MessageNotify)
+		}
+		if settings.SecurityNotify != 1 {
+			t.Errorf("expected security notify 1, got %d", settings.SecurityNotify)
 		}
 	})
 }
@@ -423,7 +430,7 @@ func TestNotifyAllowed(t *testing.T) {
 	// 关闭点赞通知：不再创建（N8-02）
 	settingsService := service.NewNotificationSettingsService(settingsRepo)
 	if err := settingsService.UpdateSettings(target.ID, &types.NotificationSettingsUpdateRequest{
-		LikeNotify: 0, CommentNotify: 1, AtNotify: 1, FollowNotify: 1, SystemNotify: 1, MessageNotify: 1,
+		LikeNotify: 0, CommentNotify: 1, AtNotify: 1, FollowNotify: 1, SystemNotify: 1, MessageNotify: 1, SecurityNotify: 1,
 	}); err != nil {
 		t.Fatalf("update settings failed: %v", err)
 	}
@@ -444,7 +451,7 @@ func TestNotifyAllowed(t *testing.T) {
 
 	// N8-07：私信提醒开关独立控制，关闭只影响 message，不影响其他类型
 	if err := settingsService.UpdateSettings(target.ID, &types.NotificationSettingsUpdateRequest{
-		LikeNotify: 1, CommentNotify: 1, AtNotify: 1, FollowNotify: 1, SystemNotify: 1, MessageNotify: 0,
+		LikeNotify: 1, CommentNotify: 1, AtNotify: 1, FollowNotify: 1, SystemNotify: 1, MessageNotify: 0, SecurityNotify: 1,
 	}); err != nil {
 		t.Fatalf("update settings failed: %v", err)
 	}

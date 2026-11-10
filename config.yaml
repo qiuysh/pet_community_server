@@ -51,6 +51,10 @@ database:
 jwt:
   secret: sdiak0i5u2y34yr845093u3u1237r545454503i4023i4
 
+# 活动签到二维码 HMAC 密钥（生产务必单独配置并轮换；留空则启动随机生成并告警）
+qrcode:
+  secret: "pet-community-qrcode-dev-secret-change-me"
+
 redis:
   enabled: true
   host: 127.0.0.1

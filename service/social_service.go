@@ -530,13 +530,14 @@ func (s *NotificationSettingsService) GetSettings(userID uint) (*model.Notificat
 
 	if settings == nil {
 		settings = &model.NotificationSettings{
-			UserID:        userID,
-			LikeNotify:    1,
-			CommentNotify: 1,
-			AtNotify:      1,
-			FollowNotify:  1,
-			SystemNotify:  1,
-			MessageNotify: 1,
+			UserID:         userID,
+			LikeNotify:     1,
+			CommentNotify:  1,
+			AtNotify:       1,
+			FollowNotify:   1,
+			SystemNotify:   1,
+			MessageNotify:  1,
+			SecurityNotify: 1,
 		}
 		if err := s.settingsRepo.Create(settings); err != nil {
 			return nil, err
@@ -546,7 +547,7 @@ func (s *NotificationSettingsService) GetSettings(userID uint) (*model.Notificat
 	return settings, nil
 }
 
-// UpdateSettings 更新通知设置（N8）：req 六个开关全量覆盖。
+// UpdateSettings 更新通知设置（N8 + R4）：req 七个开关全量覆盖。
 func (s *NotificationSettingsService) UpdateSettings(userID uint, req *types.NotificationSettingsUpdateRequest) error {
 	existing, err := s.settingsRepo.GetByUserID(userID)
 	if err != nil {
@@ -571,6 +572,7 @@ func (s *NotificationSettingsService) UpdateSettings(userID uint, req *types.Not
 	existing.FollowNotify = req.FollowNotify
 	existing.SystemNotify = req.SystemNotify
 	existing.MessageNotify = req.MessageNotify
+	existing.SecurityNotify = req.SecurityNotify
 
 	return s.settingsRepo.Update(existing)
 }

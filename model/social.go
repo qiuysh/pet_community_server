@@ -124,8 +124,10 @@ type NotificationSettings struct {
 	SystemNotify  int       `gorm:"default:1" json:"systemNotify"`
 	// MessageNotify 私信提醒开关（N8-07）：关闭后不做实时推送；消息仍入库并计未读
 	MessageNotify int       `gorm:"default:1" json:"messageNotify"`
-	CreatedAt     time.Time `gorm:"autoCreateTime" json:"createdAt"`
-	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
+	// SecurityNotify 安全提醒（R4）：关闭后不发新设备登录通知
+	SecurityNotify int       `gorm:"default:1" json:"securityNotify"`
+	CreatedAt      time.Time `gorm:"autoCreateTime" json:"createdAt"`
+	UpdatedAt      time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
 }
 
 func (NotificationSettings) TableName() string {
