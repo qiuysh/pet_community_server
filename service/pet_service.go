@@ -566,6 +566,21 @@ func (s *PetService) ListLostPets(req *types.LostPetListRequest, viewerID uint) 
 	}, nil
 }
 
+// RecordLostPetShare 寻宠分享上报（R2）：platform 非空时累加 shares_count；允许游客。
+func (s *PetService) RecordLostPetShare(id uint, platform string) (*types.LostPetShareResponse, error) {
+	lostPet, err := s.petRepo.GetLostPetByID(id)
+	if err != nil {
+		return nil, errors.New("寻宠启事不存在")
+	}
+	if strings.TrimSpace(platform) != "" {
+		if err := s.petRepo.IncrementLostPetSharesCount(id, 1); err != nil {
+			return nil, err
+		}
+		lostPet.SharesCount++
+	}
+	return &types.LostPetShareResponse{SharesCount: lostPet.SharesCount}, nil
+}
+
 func (s *PetService) UpdateLostPetStatus(userID, id uint, status int) error {
 	lostPet, err := s.petRepo.GetLostPetByID(id)
 	if err != nil {
@@ -646,6 +661,7 @@ func convertToLostPetInfo(lostPet *model.LostPet, viewerID uint) *types.LostPetI
 		Contact:      contact,
 		Status:       lostPet.Status,
 		ViewCount:    lostPet.ViewCount,
+		SharesCount:  lostPet.SharesCount,
 		CreatedAt:    lostPet.CreatedAt.Format("2006-01-02 15:04:05"),
 	}
 }

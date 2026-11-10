@@ -116,7 +116,8 @@ func main() {
 
 	postService := service.NewPostService(postRepo, likeRepo, favoriteRepo, topicRepo, userRepo, petRepo)
 	draftService := service.NewDraftService(draftRepo)
-	topicService := service.NewTopicService(topicRepo)
+	topicCategoryRepo := repository.NewTopicCategoryRepository(config.DB)
+	topicService := service.NewTopicService(topicRepo, topicCategoryRepo)
 	commentService := service.NewCommentService(commentRepo, likeRepo, postRepo, userRepo)
 	reportService := service.NewReportService(reportRepo)
 
@@ -139,9 +140,9 @@ func main() {
 
 	searchHistoryRepo := repository.NewSearchHistoryRepository(config.DB)
 	userInterestRepo := repository.NewUserInterestRepository(config.DB)
-	topicCategoryRepo := repository.NewTopicCategoryRepository(config.DB)
 	topicParticipantRepo := repository.NewTopicParticipantRepository(config.DB)
 	hotKeywordRepo := repository.NewHotKeywordRepository(config.DB)
+	adminReviewSvc.SetTopicCategoryRepository(topicCategoryRepo)
 
 	blockService := service.NewBlockService(blockRepo, userRepo)
 	blockService.SetFollowRepository(followRepo)

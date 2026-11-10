@@ -687,6 +687,57 @@ func TestPetServiceListLostPets(t *testing.T) {
 	})
 }
 
+func TestPetServiceRecordLostPetShare(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+
+	petRepo := repository.NewPetRepository(db)
+	srv := service.NewPetService(petRepo)
+
+	lostPet := &model.LostPet{
+		UserID:       1,
+		PetName:      "Buddy",
+		PetType:      1,
+		Description:  "Lost",
+		LostLocation: "Beijing",
+		LostTime:     time.Now(),
+		Contact:      "13800138000",
+		Status:       1,
+	}
+	db.Create(lostPet)
+
+	t.Run("platform increments shares_count", func(t *testing.T) {
+		resp, err := srv.RecordLostPetShare(lostPet.ID, "weibo")
+		if err != nil {
+			t.Fatalf("record lost pet share failed: %v", err)
+		}
+		if resp.SharesCount != 1 {
+			t.Fatalf("expected shares count 1, got %d", resp.SharesCount)
+		}
+		updated, _ := petRepo.GetLostPetByID(lostPet.ID)
+		if updated.SharesCount != 1 {
+			t.Fatalf("expected persisted shares count 1, got %d", updated.SharesCount)
+		}
+	})
+
+	t.Run("empty platform does not increment", func(t *testing.T) {
+		before, _ := petRepo.GetLostPetByID(lostPet.ID)
+		resp, err := srv.RecordLostPetShare(lostPet.ID, "  ")
+		if err != nil {
+			t.Fatalf("record lost pet share failed: %v", err)
+		}
+		if resp.SharesCount != before.SharesCount {
+			t.Fatalf("expected shares count unchanged %d, got %d", before.SharesCount, resp.SharesCount)
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		_, err := srv.RecordLostPetShare(9999, "link")
+		if err == nil {
+			t.Fatal("expected error for missing lost pet")
+		}
+	})
+}
+
 func TestPetServiceUpdateLostPetStatus(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 

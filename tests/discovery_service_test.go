@@ -251,6 +251,23 @@ func TestDiscoveryServiceCreateTopic(t *testing.T) {
 		if info.Status != 0 {
 			t.Errorf("expected pending status 0, got %d", info.Status)
 		}
+		if info.CategoryID != 0 {
+			t.Errorf("expected categoryId 0, got %d", info.CategoryID)
+		}
+	})
+
+	t.Run("with category", func(t *testing.T) {
+		db.Create(&model.TopicCategory{ID: 11, Name: "养宠知识", Status: 1, SortOrder: 1})
+		info, err := srv.CreateTopic(1, &types.TopicCreateRequest{
+			Name:       "#KnowledgeTopic",
+			CategoryID: 11,
+		})
+		if err != nil {
+			t.Fatalf("create topic with category failed: %v", err)
+		}
+		if info.CategoryID != 11 {
+			t.Fatalf("expected categoryId=11, got %d", info.CategoryID)
+		}
 	})
 
 	t.Run("duplicate", func(t *testing.T) {

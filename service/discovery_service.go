@@ -721,6 +721,7 @@ func (s *DiscoveryService) GetTopicDetail(topicID, userID uint) (*types.TopicDet
 		Name:              topic.Name,
 		Description:       topic.Description,
 		Cover:             topic.Cover,
+		CategoryID:        topic.CategoryID,
 		PostsCount:        topic.PostsCount,
 		SharesCount:       topic.SharesCount,
 		Status:            topic.Status,
@@ -827,10 +828,16 @@ func (s *DiscoveryService) CreateTopic(userID uint, req *types.TopicCreateReques
 		return nil, errors.New("话题已存在")
 	}
 
+	categoryID, err := resolveTopicCategoryID(s.topicCategoryRepo, req.CategoryID)
+	if err != nil {
+		return nil, err
+	}
+
 	topic := &model.Topic{
 		Name:        req.Name,
 		Description: req.Description,
 		Cover:       req.Cover,
+		CategoryID:  categoryID,
 		CreatorID:   userID,
 		Status:      0, // 待审核；运营通过后置 1
 	}
@@ -845,6 +852,7 @@ func (s *DiscoveryService) CreateTopic(userID uint, req *types.TopicCreateReques
 		Name:        topic.Name,
 		Description: topic.Description,
 		Cover:       topic.Cover,
+		CategoryID:  topic.CategoryID,
 		PostsCount:  0,
 		Status:      topic.Status,
 		CreatedAt:   topic.CreatedAt.Format(time.RFC3339),

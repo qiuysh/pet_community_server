@@ -92,19 +92,21 @@ type AdminResponse struct {
 
 // ReviewContent 待审核内容
 type ReviewContent struct {
-	ID         uint   `json:"id"`
-	Type       string `json:"type"`
-	Content    string `json:"content"`
-	Images     string `json:"images,omitempty"`
-	Video      string `json:"video,omitempty"`
-	PostID     uint   `json:"postId,omitempty"`
-	UserID     uint   `json:"userId"`
-	Username   string `json:"username"`
-	Avatar     string `json:"avatar"`
-	Status     int    `json:"status"`
-	IsPinned   int    `json:"isPinned,omitempty"`
-	IsFeatured int    `json:"isFeatured,omitempty"`
-	CreatedAt  string `json:"createdAt"`
+	ID           uint   `json:"id"`
+	Type         string `json:"type"`
+	Content      string `json:"content"`
+	Images       string `json:"images,omitempty"`
+	Video        string `json:"video,omitempty"`
+	PostID       uint   `json:"postId,omitempty"`
+	UserID       uint   `json:"userId"`
+	Username     string `json:"username"`
+	Avatar       string `json:"avatar"`
+	Status       int    `json:"status"`
+	IsPinned     int    `json:"isPinned,omitempty"`
+	IsFeatured   int    `json:"isFeatured,omitempty"`
+	CategoryID   uint   `json:"categoryId,omitempty"`
+	CategoryName string `json:"categoryName,omitempty"`
+	CreatedAt    string `json:"createdAt"`
 }
 
 // ReviewListResponse 待审核列表响应

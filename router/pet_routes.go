@@ -41,6 +41,8 @@ func SetupPetRoutes(r *gin.RouterGroup, petController *controller.PetController)
 	{
 		lost.GET("", petController.ListLostPets)
 		lost.GET("/:id", petController.GetLostPet)
+		// R2：浏览型分享，游客也可上报（打开面板不请求，选定平台才 POST）
+		lost.POST("/:id/share", petController.RecordLostPetShare)
 
 		auth := lost.Group("")
 		auth.Use(middleware.UserAuthMiddleware())

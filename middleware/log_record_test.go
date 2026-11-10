@@ -18,6 +18,7 @@ func TestExtractActionTypeMatchesRealRoutes(t *testing.T) {
 		{"/api/v1/posts/12/like", "POST", "like"},
 		{"/api/v1/posts/12/favorite", "POST", "favorite"},
 		{"/api/v1/posts/12/share", "POST", "share"},
+		{"/api/v1/lost-pets/5/share", "POST", "share"},
 		{"/api/v1/posts/12/comments", "POST", "comment_create"},
 		{"/api/v1/posts/comments/9", "DELETE", "comment_delete"},
 		{"/api/v1/posts/comments/9/like", "POST", "like"},

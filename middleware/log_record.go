@@ -115,6 +115,8 @@ func extractActionType(path, method string) string {
 		return "favorite"
 	case strings.HasPrefix(path, "/api/v1/posts") && strings.HasSuffix(path, "/share"):
 		return "share"
+	case strings.HasPrefix(path, "/api/v1/lost-pets") && strings.HasSuffix(path, "/share"):
+		return "share"
 	case strings.HasPrefix(path, "/api/v1/posts/comments"):
 		switch method {
 		case "POST":

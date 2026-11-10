@@ -588,6 +588,7 @@ CREATE TABLE IF NOT EXISTS lost_pets (
     contact VARCHAR(100) NOT NULL COMMENT '联系方式',
     status TINYINT DEFAULT 1 COMMENT '状态（1-寻找中，2-已找到，3-已结束）',
     view_count INT DEFAULT 0 COMMENT '浏览数',
+    shares_count INT NOT NULL DEFAULT 0 COMMENT '分享数（用户选择分享平台后累加）',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发布时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     INDEX idx_lost_pets_user_id (user_id),

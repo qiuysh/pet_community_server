@@ -566,3 +566,26 @@ func (c *PetController) UpdateLostPetStatus(ctx *gin.Context) {
 
 	utils.RespondSuccess(ctx, nil)
 }
+
+// RecordLostPetShare 寻宠分享上报（R2）：游客可调；platform 非空才累加计数。
+func (c *PetController) RecordLostPetShare(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "ID无效")
+		return
+	}
+
+	var req types.ShareRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		utils.RespondError(ctx, types.CodeParamError, err.Error())
+		return
+	}
+
+	result, err := c.petService.RecordLostPetShare(uint(id), req.Platform)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
+		return
+	}
+	utils.RespondSuccess(ctx, result)
+}

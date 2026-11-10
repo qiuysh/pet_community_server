@@ -148,7 +148,13 @@ type LostPetInfo struct {
 	Contact      string    `json:"contact"`
 	Status       int       `json:"status"`
 	ViewCount    int       `json:"viewCount"`
+	SharesCount  int       `json:"sharesCount"`
 	CreatedAt    string    `json:"createdAt"`
+}
+
+// LostPetShareResponse 寻宠分享结果；链接由前端拼详情 URL，服务端只负责计数。
+type LostPetShareResponse struct {
+	SharesCount int `json:"sharesCount"`
 }
 
 type LostPetCreateRequest struct {

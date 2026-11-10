@@ -982,11 +982,18 @@ func (s *DraftService) convertToDraftInfo(draft *model.Draft) *types.DraftInfo {
 }
 
 type TopicService struct {
-	topicRepo *repository.TopicRepository
+	topicRepo         *repository.TopicRepository
+	topicCategoryRepo *repository.TopicCategoryRepository
 }
 
-func NewTopicService(topicRepo *repository.TopicRepository) *TopicService {
-	return &TopicService{topicRepo: topicRepo}
+func NewTopicService(
+	topicRepo *repository.TopicRepository,
+	topicCategoryRepo *repository.TopicCategoryRepository,
+) *TopicService {
+	return &TopicService{
+		topicRepo:         topicRepo,
+		topicCategoryRepo: topicCategoryRepo,
+	}
 }
 
 func (s *TopicService) CreateTopic(userID uint, req *types.TopicCreateRequest) (*types.TopicInfo, error) {
@@ -1007,10 +1014,16 @@ func (s *TopicService) CreateTopic(userID uint, req *types.TopicCreateRequest) (
 		return nil, errors.New("话题已存在")
 	}
 
+	categoryID, err := resolveTopicCategoryID(s.topicCategoryRepo, req.CategoryID)
+	if err != nil {
+		return nil, err
+	}
+
 	topic := &model.Topic{
 		Name:        req.Name,
 		Description: req.Description,
 		Cover:       req.Cover,
+		CategoryID:  categoryID,
 		CreatorID:   userID,
 		Status:      0, // 待审核
 	}
@@ -1080,6 +1093,7 @@ func (s *TopicService) convertToTopicInfo(topic *model.Topic) *types.TopicInfo {
 		Name:        topic.Name,
 		Description: topic.Description,
 		Cover:       topic.Cover,
+		CategoryID:  topic.CategoryID,
 		PostsCount:  topic.PostsCount,
 		Status:      topic.Status,
 	}

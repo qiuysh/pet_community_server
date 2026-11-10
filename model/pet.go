@@ -92,6 +92,7 @@ type LostPet struct {
 	Contact      string    `gorm:"size:100;not null" json:"contact"`
 	Status       int       `gorm:"default:1" json:"status"`
 	ViewCount    int       `gorm:"default:0" json:"viewCount"`
+	SharesCount  int       `gorm:"default:0" json:"sharesCount"` // 选择平台后累加，与帖子/话题分享数同口径
 	CreatedAt    time.Time `gorm:"autoCreateTime" json:"createdAt"`
 	UpdatedAt    time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
 }

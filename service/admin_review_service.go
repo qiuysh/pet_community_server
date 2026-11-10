@@ -14,9 +14,10 @@ import (
 
 // AdminReviewService 负责内容审核:待审核列表/通过/拒绝/批量/历史。
 type AdminReviewService struct {
-	adminRepo *repository.AdminRepository
-	userRepo  *repository.UserRepository
-	postRepo  *repository.PostRepository
+	adminRepo         *repository.AdminRepository
+	userRepo          *repository.UserRepository
+	postRepo          *repository.PostRepository
+	topicCategoryRepo *repository.TopicCategoryRepository
 }
 
 // NewAdminReviewService 构造 AdminReviewService。
@@ -27,6 +28,11 @@ func NewAdminReviewService(adminRepo *repository.AdminRepository, userRepo *repo
 // SetPostRepository 注入帖子仓储，用于动态置顶/精选（I7）。
 func (s *AdminReviewService) SetPostRepository(postRepo *repository.PostRepository) {
 	s.postRepo = postRepo
+}
+
+// SetTopicCategoryRepository 注入话题分类仓储，审核列表展示分类名（R7）。
+func (s *AdminReviewService) SetTopicCategoryRepository(repo *repository.TopicCategoryRepository) {
+	s.topicCategoryRepo = repo
 }
 
 // PinPost 置顶/取消置顶动态（I7-01 管理员），并写审计日志。
@@ -182,15 +188,23 @@ func (s *AdminReviewService) GetPendingReviews(reviewType string, page, pageSize
 			if user == nil {
 				user = &model.User{}
 			}
+			categoryName := ""
+			if topic.CategoryID > 0 && s.topicCategoryRepo != nil {
+				if cat, err := s.topicCategoryRepo.GetByID(topic.CategoryID); err == nil {
+					categoryName = cat.Name
+				}
+			}
 			contents = append(contents, types.ReviewContent{
-				ID:        topic.ID,
-				Type:      "topic",
-				Content:   topic.Name + " — " + topic.Description,
-				UserID:    topic.CreatorID,
-				Username:  user.Nickname,
-				Avatar:    user.Avatar,
-				Status:    topic.Status,
-				CreatedAt: topic.CreatedAt.Format(time.RFC3339),
+				ID:           topic.ID,
+				Type:         "topic",
+				Content:      topic.Name + " — " + topic.Description,
+				UserID:       topic.CreatorID,
+				Username:     user.Nickname,
+				Avatar:       user.Avatar,
+				Status:       topic.Status,
+				CategoryID:   topic.CategoryID,
+				CategoryName: categoryName,
+				CreatedAt:    topic.CreatedAt.Format(time.RFC3339),
 			})
 		}
 	}

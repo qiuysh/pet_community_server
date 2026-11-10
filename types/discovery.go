@@ -68,6 +68,7 @@ type TopicDetailInfo struct {
 	Name              string `json:"name"`
 	Description       string `json:"description"`
 	Cover             string `json:"cover"`
+	CategoryID        uint   `json:"categoryId"`
 	PostsCount        int    `json:"postsCount"`
 	SharesCount       int    `json:"sharesCount"`
 	Status            int    `json:"status"`

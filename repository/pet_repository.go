@@ -237,6 +237,11 @@ func (r *PetRepository) IncrementLostPetViewCount(id uint) error {
 	return r.db.Model(&model.LostPet{}).Where("id = ?", id).UpdateColumn("view_count", gorm.Expr("view_count + 1")).Error
 }
 
+// IncrementLostPetSharesCount 累加寻宠分享数（R2：选定平台后才 +1）
+func (r *PetRepository) IncrementLostPetSharesCount(id uint, delta int) error {
+	return r.db.Model(&model.LostPet{}).Where("id = ?", id).UpdateColumn("shares_count", gorm.Expr("shares_count + ?", delta)).Error
+}
+
 func (r *PetRepository) InitBreeds() error {
 	var count int64
 	r.db.Model(&model.PetBreed{}).Count(&count)
