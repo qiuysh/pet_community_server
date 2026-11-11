@@ -7,6 +7,8 @@ import (
 	"pet-community/types"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // AlbumService 活动相册服务
@@ -218,11 +220,15 @@ func (s *ActivityReviewService) PublishReview(userID uint, req *types.ActivityRe
 	return s.convertToReviewInfo(review)
 }
 
-// GetReview 获取活动回顾
+// GetReview 获取活动回顾。
+// 未发布回顾时返回 (nil, nil)：公开详情页会并行拉取回顾，缺失属于常态，不应 404。
 func (s *ActivityReviewService) GetReview(activityID uint) (*types.ActivityReviewInfo, error) {
 	review, err := s.reviewRepo.GetByActivity(activityID)
 	if err != nil {
-		return nil, errors.New("活动回顾不存在")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
 	}
 
 	return s.convertToReviewInfo(review)
