@@ -189,7 +189,7 @@ type ThirdPartyBindRequest struct {
 	Code     string `json:"code" binding:"required,len=6"`
 }
 
-// BindThirdPartyAccountRequest 已登录用户绑定第三方账号（演示模式用 code）
+// BindThirdPartyAccountRequest 已登录用户绑定第三方账号（code 来自平台授权回调）
 type BindThirdPartyAccountRequest struct {
 	Platform string `json:"platform" binding:"required,oneof=wechat weibo qq"`
 	Code     string `json:"code" binding:"required"`

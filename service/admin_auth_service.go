@@ -34,29 +34,89 @@ func NewAdminAuthService(adminRepo *repository.AdminRepository) *AdminAuthServic
 const maxLoginFailures = 5
 const loginLockDuration = 30 * time.Minute
 
-func (s *AdminAuthService) Login(username, password, ip, userAgent string) (string, *model.AdminUser, error) {
+// adminFailCount 连续失败次数：优先 Redis，否则用库内 FailedLoginCount。
+func (s *AdminAuthService) adminFailCount(admin *model.AdminUser) int {
+	if n, err := cache.GetLoginFailureCount(cache.LoginScopeAdmin, admin.ID); err == nil {
+		return n
+	}
+	return admin.FailedLoginCount
+}
+
+func (s *AdminAuthService) requireCaptcha(admin *model.AdminUser) bool {
+	return s.adminFailCount(admin) >= adminCaptchaRequired
+}
+
+func (s *AdminAuthService) loginErr(msg string, requireCaptcha bool) error {
+	return &AdminLoginError{Msg: msg, RequireCaptcha: requireCaptcha}
+}
+
+// recordPasswordFailure 记录一次失败并返回对外错误（含是否需要验证码）。
+func (s *AdminAuthService) recordPasswordFailure(admin *model.AdminUser, username, ip, userAgent, reason string) error {
+	if ferr := cache.RecordLoginFailure(cache.LoginScopeAdmin, admin.ID); errors.Is(ferr, cache.ErrLoginLocked) {
+		until := time.Now().Add(loginLockDuration)
+		admin.LockedUntil = &until
+		admin.FailedLoginCount = 0
+		if uerr := s.adminRepo.Update(admin); uerr != nil {
+			util.LogError(uerr, "AdminAuthService.Login.persistLock")
+		}
+		s.recordLoginLog(admin.ID, username, ip, userAgent, 0, "账号已锁定")
+		return s.loginErr(cache.ErrLoginLocked.Error(), true)
+	} else if ferr == nil {
+		// Redis 已计数
+	} else {
+		admin.FailedLoginCount++
+		if admin.FailedLoginCount >= maxLoginFailures {
+			until := time.Now().Add(loginLockDuration)
+			admin.LockedUntil = &until
+			admin.FailedLoginCount = 0
+		}
+		if uerr := s.adminRepo.Update(admin); uerr != nil {
+			util.LogError(uerr, "AdminAuthService.Login.persistFailedLoginCount")
+		}
+	}
+	s.recordLoginLog(admin.ID, username, ip, userAgent, 0, reason)
+	return s.loginErr("用户名或密码错误", s.requireCaptcha(admin))
+}
+
+func (s *AdminAuthService) Login(username, password, ip, userAgent, captchaID, captchaCode string) (string, *model.AdminUser, error) {
 	admin, err := s.adminRepo.FindByUsername(username)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			s.recordLoginLog(0, username, ip, userAgent, 0, "用户不存在")
-			return "", nil, errors.New("用户不存在")
+			return "", nil, s.loginErr("用户不存在", false)
 		}
 		util.LogError(err, "AdminService.Login")
-		return "", nil, errors.New("系统错误")
+		return "", nil, s.loginErr("系统错误", false)
 	}
 
 	if admin.Status != 1 {
 		s.recordLoginLog(admin.ID, username, ip, userAgent, 0, "账号已被禁用")
-		return "", nil, errors.New("该账号已被禁用")
+		return "", nil, s.loginErr("该账号已被禁用", false)
 	}
 
 	if locked, err := cache.IsLoginLocked(cache.LoginScopeAdmin, admin.ID); err == nil && locked {
 		s.recordLoginLog(admin.ID, username, ip, userAgent, 0, "账号已锁定")
-		return "", nil, cache.ErrLoginLocked
+		return "", nil, s.loginErr(cache.ErrLoginLocked.Error(), true)
 	}
 	if admin.LockedUntil != nil && admin.LockedUntil.After(time.Now()) {
 		s.recordLoginLog(admin.ID, username, ip, userAgent, 0, "账号已锁定")
-		return "", nil, errors.New("登录失败次数过多，请30分钟后再试")
+		return "", nil, s.loginErr("登录失败次数过多，请30分钟后再试", true)
+	}
+
+	needCaptcha := s.requireCaptcha(admin)
+	if needCaptcha {
+		if strings.TrimSpace(captchaID) == "" || strings.TrimSpace(captchaCode) == "" {
+			return "", nil, s.recordPasswordFailure(admin, username, ip, userAgent, "缺少验证码")
+		}
+		if err := VerifyAdminCaptcha(captchaID, captchaCode); err != nil {
+			// 验证码失败计入失败次数（R9）
+			return "", nil, s.recordPasswordFailure(admin, username, ip, userAgent, "验证码错误")
+		}
+	} else if strings.TrimSpace(captchaID) != "" || strings.TrimSpace(captchaCode) != "" {
+		// 未达阈值时若主动带了验证码，错了同样计失败；对了则继续验密码
+		if err := VerifyAdminCaptcha(captchaID, captchaCode); err != nil {
+			return "", nil, s.recordPasswordFailure(admin, username, ip, userAgent, "验证码错误")
+		}
 	}
 
 	decryptedPassword, err := util.DecryptRSA(password)
@@ -65,38 +125,22 @@ func (s *AdminAuthService) Login(username, password, ip, userAgent string) (stri
 	}
 
 	if !util.CheckPasswordHash(decryptedPassword, admin.Password) {
-		if ferr := cache.RecordLoginFailure(cache.LoginScopeAdmin, admin.ID); errors.Is(ferr, cache.ErrLoginLocked) {
-			until := time.Now().Add(loginLockDuration)
-			admin.LockedUntil = &until
-			admin.FailedLoginCount = 0
-			_ = s.adminRepo.Update(admin)
-			s.recordLoginLog(admin.ID, username, ip, userAgent, 0, "账号已锁定")
-			return "", nil, cache.ErrLoginLocked
-		} else if ferr == nil {
-			// Redis 已计数
-		} else {
-			admin.FailedLoginCount++
-			if admin.FailedLoginCount >= maxLoginFailures {
-				until := time.Now().Add(loginLockDuration)
-				admin.LockedUntil = &until
-				admin.FailedLoginCount = 0
-			}
-			_ = s.adminRepo.Update(admin)
-		}
-		s.recordLoginLog(admin.ID, username, ip, userAgent, 0, "密码错误")
-		return "", nil, errors.New("用户名或密码错误")
+		return "", nil, s.recordPasswordFailure(admin, username, ip, userAgent, "密码错误")
 	}
 
 	cache.ClearLoginFailures(cache.LoginScopeAdmin, admin.ID)
 	admin.FailedLoginCount = 0
 	admin.LockedUntil = nil
-	_ = s.adminRepo.Update(admin)
+	// 登录成功清零失败计数；失败不阻断登录，原锁定状态仍会在下次登录时被校验
+	if uerr := s.adminRepo.Update(admin); uerr != nil {
+		util.LogError(uerr, "AdminAuthService.Login.resetLoginState")
+	}
 
 	token, err := util.GenerateToken(admin.ID, admin.Username, normalizeAdminRole(admin.Role))
 	if err != nil {
 		util.LogError(err, "AdminService.Login")
 		s.recordLoginLog(admin.ID, username, ip, userAgent, 0, "生成token失败")
-		return "", nil, errors.New("生成token失败")
+		return "", nil, s.loginErr("生成token失败", false)
 	}
 
 	s.recordLoginLog(admin.ID, username, ip, userAgent, 1, "")

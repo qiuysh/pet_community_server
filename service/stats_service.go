@@ -90,8 +90,10 @@ func (s *StatsService) calculateOverviewStats(date string) *types.OverviewStats 
 }
 
 func (s *StatsService) CalculateStats() error {
-	today := time.Now().Format("2006-01-02")
-	todayDate, _ := time.Parse("2006-01-02", today)
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	// 用本地日历日 00:00，避免 time.Parse 默认 UTC 导致 MySQL DATE 比对偏移
+	todayDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 
 	return s.statsRepo.Transaction(func(tx *gorm.DB) error {
 		var userCount int64
@@ -215,7 +217,7 @@ func (s *StatsService) GetTrendData(trendType string, days int) (*types.TrendDat
 		}
 		return &types.TrendData{Title: "用户活动趋势", XKey: "日期", YKey: "活动次数", Data: data}, nil
 	default:
-		return &types.TrendData{Title: trendType, XKey: "日期", YKey: "数值", Data: data}, nil
+		return nil, fmt.Errorf("不支持的统计类型: %s", trendType)
 	}
 }
 
@@ -254,14 +256,22 @@ func (s *StatsService) GetComparisonData(trendType string, compareType string) (
 		for i := days - 1; i >= 0; i-- {
 			date := endTime.AddDate(0, 0, -i)
 			dateStr := date.Format("2006-01-02")
-			count, _ := s.postRepo.CountByDate(dateStr)
+			count, err := s.postRepo.CountByDate(dateStr)
+			if err != nil {
+				return nil, err
+			}
 			currentData = append(currentData, types.ChartDataPoint{Label: dateStr, Value: int(count)})
 
 			prevDate := previousEnd.AddDate(0, 0, -i)
 			prevDateStr := prevDate.Format("2006-01-02")
-			prevCount, _ := s.postRepo.CountByDate(prevDateStr)
+			prevCount, err := s.postRepo.CountByDate(prevDateStr)
+			if err != nil {
+				return nil, err
+			}
 			previousData = append(previousData, types.ChartDataPoint{Label: prevDateStr, Value: int(prevCount)})
 		}
+	default:
+		return nil, fmt.Errorf("不支持的对比类型: %s", trendType)
 	}
 
 	comparisonLabel := "环比"
@@ -327,7 +337,7 @@ func (s *StatsService) GetDistributionData(distType string) (*types.Distribution
 		}
 		return &types.DistributionData{Title: "用户性别分布", Type: "pie", Data: data}, nil
 	default:
-		return &types.DistributionData{Title: distType, Type: "bar", Data: data}, nil
+		return nil, fmt.Errorf("不支持的分布类型: %s", distType)
 	}
 }
 

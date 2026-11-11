@@ -14,12 +14,20 @@ import (
 
 // AdminNotificationService 负责系统通知管理:CRUD + 发送 + 定时处理。
 type AdminNotificationService struct {
-	adminRepo *repository.AdminRepository
+	adminRepo    *repository.AdminRepository
+	settingsRepo *repository.NotificationSettingsRepository
 }
 
 // NewAdminNotificationService 构造 AdminNotificationService。
 func NewAdminNotificationService(adminRepo *repository.AdminRepository) *AdminNotificationService {
 	return &AdminNotificationService{adminRepo: adminRepo}
+}
+
+// SetNotificationSettingsRepository 注入通知设置仓储，使运营类系统通知尊重用户开关（N8-06）。
+//
+// 仅过滤运营公告类：举报结果 / 账号安全等合规通知走各自服务直建，不受此开关影响。
+func (s *AdminNotificationService) SetNotificationSettingsRepository(settingsRepo *repository.NotificationSettingsRepository) {
+	s.settingsRepo = settingsRepo
 }
 
 func (s *AdminNotificationService) CreateNotification(title, content string, notificationType, targetType int, targetIDs []uint, publishAt *time.Time, adminID uint, ip string) (*model.SystemNotification, error) {
@@ -150,7 +158,13 @@ func (s *AdminNotificationService) SendNotification(id uint, adminID uint, ip st
 		}
 	}
 
+	var skipped int
 	for _, uid := range userIDs {
+		// N8-06：用户已关闭系统通知则跳过（合规通知不经过本方法，不受影响）
+		if !NotifyAllowed(s.settingsRepo, uid, "system") {
+			skipped++
+			continue
+		}
 		userNotification := &model.UserNotification{
 			UserID:        uid,
 			Type:          "system",
@@ -174,7 +188,7 @@ func (s *AdminNotificationService) SendNotification(id uint, adminID uint, ip st
 		Action:     "send_notification",
 		TargetType: "notification",
 		TargetID:   id,
-		Detail:     "发送通知: " + notification.Title + ", 目标用户数: " + strconv.Itoa(len(userIDs)),
+		Detail:     "发送通知: " + notification.Title + ", 目标用户数: " + strconv.Itoa(len(userIDs)) + ", 关闭通知被跳过: " + strconv.Itoa(skipped),
 		IP:         ip,
 	}
 	return s.adminRepo.CreateOperationLog(log)

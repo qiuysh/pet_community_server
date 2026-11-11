@@ -120,7 +120,7 @@ func (ActivityAlbum) TableName() string {
 // ActivityReview 活动回顾模型
 type ActivityReview struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	ActivityID  uint      `gorm:"not null;unique;index" json:"activityId"`
+	ActivityID  uint      `gorm:"not null;uniqueIndex:activity_id" json:"activityId"`
 	Title       string    `gorm:"size:100;not null" json:"title"`
 	Content     string    `gorm:"type:text;not null" json:"content"`
 	Photos      string    `gorm:"type:text" json:"photos"`

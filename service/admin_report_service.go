@@ -9,6 +9,7 @@ import (
 	"pet-community/model"
 	"pet-community/repository"
 	"pet-community/types"
+	"pet-community/utils"
 )
 
 // AdminReportService 管理后台举报处理：列表/处理/批量/统计。
@@ -86,7 +87,10 @@ func (s *AdminReportService) HandleReport(reportID uint, action, result string, 
 		Detail:     fmt.Sprintf("处理举报#%d action=%s result=%s", reportID, action, handleResult),
 		IP:         ip,
 	}
-	_ = s.adminRepo.CreateOperationLog(log)
+	if err := s.adminRepo.CreateOperationLog(log); err != nil {
+		// 审计日志写失败不能回滚已完成的处置，但必须留痕
+		utils.LogError(err, "AdminReportService.HandleReport.writeOperationLog")
+	}
 	return nil
 }
 
@@ -198,14 +202,16 @@ func (s *AdminReportService) notifyReporter(report *model.Report, action, handle
 	if action == "reject" {
 		content = fmt.Sprintf("您的举报（#%d）经核查后已忽略：%s", report.ID, handleResult)
 	}
-	_ = s.adminRepo.CreateUserNotification(&model.UserNotification{
+	if err := s.adminRepo.CreateUserNotification(&model.UserNotification{
 		UserID:      report.ReporterID,
 		Type:        "system",
 		Title:       title,
 		Content:     content,
 		TriggerType: "report",
 		TriggerID:   report.ID,
-	})
+	}); err != nil {
+		utils.LogError(err, "AdminReportService.notifyReporter")
+	}
 }
 
 func (s *AdminReportService) notifyTargetAuthor(report *model.Report, handleResult string) {
@@ -229,14 +235,16 @@ func (s *AdminReportService) notifyTargetAuthor(report *model.Report, handleResu
 	if authorID == 0 {
 		return
 	}
-	_ = s.adminRepo.CreateUserNotification(&model.UserNotification{
+	if err := s.adminRepo.CreateUserNotification(&model.UserNotification{
 		UserID:      authorID,
 		Type:        "system",
 		Title:       "内容违规警告",
 		Content:     fmt.Sprintf("您的%s内容因被举报受到警告：%s", report.TargetType, handleResult),
 		TriggerType: report.TargetType,
 		TriggerID:   report.TargetID,
-	})
+	}); err != nil {
+		utils.LogError(err, "AdminReportService.notifyTargetAuthor")
+	}
 }
 
 func (s *AdminReportService) toAdminReportInfo(report *model.Report) *types.ReportInfo {

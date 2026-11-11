@@ -196,7 +196,14 @@ func TestSubmissionService(t *testing.T) {
 	submissionRepo := repository.NewSubmissionRepository(db)
 	userRepo := repository.NewUserRepository(db)
 	voteRepo := repository.NewVoteRepository(db)
-	srv := service.NewSubmissionService(submissionRepo, activityRepo, registrationRepo, userRepo, voteRepo)
+	srv := service.NewSubmissionService(service.SubmissionServiceDeps{
+		SubmissionRepo:   submissionRepo,
+		ActivityRepo:     activityRepo,
+		RegistrationRepo: registrationRepo,
+		UserRepo:         userRepo,
+		VoteRepo:         voteRepo,
+		NotificationRepo: repository.NewNotificationRepository(db),
+	})
 
 	db.Create(&model.User{ID: 1, Nickname: "Alice", Phone: "alice_phone", Email: "alice@test.com", Status: 1})
 	activity := createActiveActivity(db)

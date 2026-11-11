@@ -116,6 +116,7 @@ type TopicInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Cover       string `json:"cover"`
+	CategoryID  uint   `json:"categoryId"`
 	PostsCount  int    `json:"postsCount"`
 	Status      int    `json:"status"`
 }
@@ -124,6 +125,8 @@ type TopicCreateRequest struct {
 	Name        string `json:"name" binding:"required,max=50"`
 	Description string `json:"description" binding:"omitempty,max=200"`
 	Cover       string `json:"cover" binding:"omitempty,max=255"`
+	// CategoryID 话题分类；0=未分类；>0 须为已启用分类
+	CategoryID uint `json:"categoryId" binding:"omitempty"`
 }
 
 type TopicListRequest struct {

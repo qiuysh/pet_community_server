@@ -225,10 +225,10 @@ func (c *AdoptController) ListApplicationsByAdoption(ctx *gin.Context) {
 		return
 	}
 
-	statusStr := ctx.Query("status")
-	status := -1
-	if statusStr != "" {
-		status, _ = strconv.Atoi(statusStr)
+	status, statusErr := ParseIntQueryDefault(ctx, "status", -1)
+	if statusErr != nil {
+		utils.RespondError(ctx, types.CodeParamError, "状态参数无效")
+		return
 	}
 
 	pageStr := ctx.DefaultQuery("page", "1")
@@ -249,10 +249,10 @@ func (c *AdoptController) ListApplicationsByAdoption(ctx *gin.Context) {
 // ListMyApplications 我的领养申请列表
 func (c *AdoptController) ListMyApplications(ctx *gin.Context) {
 	userID := ctx.GetUint("user_id")
-	statusStr := ctx.Query("status")
-	status := -1
-	if statusStr != "" {
-		status, _ = strconv.Atoi(statusStr)
+	status, statusErr := ParseIntQueryDefault(ctx, "status", -1)
+	if statusErr != nil {
+		utils.RespondError(ctx, types.CodeParamError, "状态参数无效")
+		return
 	}
 
 	pageStr := ctx.DefaultQuery("page", "1")
@@ -318,8 +318,9 @@ func (c *AdoptController) CreateFollowUp(ctx *gin.Context) {
 	utils.RespondSuccess(ctx, followUp)
 }
 
-// ListFollowUpsByAdoption 获取领养回访记录列表
+// ListFollowUpsByAdoption 获取领养回访记录列表（R6：仅当事双方可见，公开路由下游客必被拒）
 func (c *AdoptController) ListFollowUpsByAdoption(ctx *gin.Context) {
+	viewerID := ctx.GetUint("user_id")
 	idStr := ctx.Param("id")
 	adoptionID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -327,14 +328,20 @@ func (c *AdoptController) ListFollowUpsByAdoption(ctx *gin.Context) {
 		return
 	}
 
-	pageStr := ctx.DefaultQuery("page", "1")
-	pageSizeStr := ctx.DefaultQuery("page_size", "10")
-	page, _ := strconv.Atoi(pageStr)
-	pageSize, _ := strconv.Atoi(pageSizeStr)
-
-	result, err := c.adoptService.ListFollowUpsByAdoption(uint(adoptionID), page, pageSize)
+	page, err := ParseIntQueryDefault(ctx, "page", 1)
 	if err != nil {
-		utils.RespondError(ctx, types.CodeSystemError, err.Error())
+		utils.RespondError(ctx, types.CodeParamError, err.Error())
+		return
+	}
+	pageSize, err := ParseIntQueryDefault(ctx, "page_size", 10)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, err.Error())
+		return
+	}
+
+	result, err := c.adoptService.ListFollowUpsByAdoption(viewerID, uint(adoptionID), page, pageSize)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
 		return
 	}
 

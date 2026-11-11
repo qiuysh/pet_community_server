@@ -11,7 +11,16 @@ func SetupPetRoutes(r *gin.RouterGroup, petController *controller.PetController)
 	pet := r.Group("/pets")
 	{
 		pet.GET("/breeds", petController.GetBreeds)
-		pet.GET("", petController.ListPets)
+
+		// 公开读接口：可选登录，便于 R5 粉丝可见判定
+		petPublic := pet.Group("")
+		petPublic.Use(middleware.OptionalUserAuthMiddleware())
+		{
+			petPublic.GET("", petController.ListPets)
+			petPublic.GET("/:id", petController.GetPet)
+			petPublic.GET("/:id/album", petController.GetPetAlbum)
+			petPublic.GET("/:id/growth-records", petController.GetGrowthRecords)
+		}
 
 		auth := pet.Group("")
 		auth.Use(middleware.UserAuthMiddleware())
@@ -30,10 +39,6 @@ func SetupPetRoutes(r *gin.RouterGroup, petController *controller.PetController)
 			auth.PUT("/:id/growth-records/:recordId", petController.UpdateGrowthRecord)
 			auth.DELETE("/:id/growth-records/:recordId", petController.DeleteGrowthRecord)
 		}
-
-		pet.GET("/:id", petController.GetPet)
-		pet.GET("/:id/album", petController.GetPetAlbum)
-		pet.GET("/:id/growth-records", petController.GetGrowthRecords)
 	}
 
 	lost := r.Group("/lost-pets")
@@ -41,6 +46,8 @@ func SetupPetRoutes(r *gin.RouterGroup, petController *controller.PetController)
 	{
 		lost.GET("", petController.ListLostPets)
 		lost.GET("/:id", petController.GetLostPet)
+		// R2：浏览型分享，游客也可上报（打开面板不请求，选定平台才 POST）
+		lost.POST("/:id/share", petController.RecordLostPetShare)
 
 		auth := lost.Group("")
 		auth.Use(middleware.UserAuthMiddleware())

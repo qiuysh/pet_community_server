@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"pet-community/config"
 	"pet-community/service"
 	"pet-community/types"
 	"pet-community/utils"
@@ -49,9 +50,13 @@ func (c *UserController) Login(ctx *gin.Context) {
 
 	resp, err := c.userService.Login(&req, ip, userAgent)
 	if err != nil {
-		utils.RespondError(ctx, types.CodeUnauthorized, err.Error())
+		// 凭据错误是业务失败，勿用 HTTP 401（前端会走 refresh / 清会话）
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
 		return
 	}
+
+	// 登录路由本身不经过鉴权中间件，这里补写 user_id，行为日志才能归到具体用户
+	ctx.Set("user_id", resp.User.ID)
 
 	utils.RespondSuccess(ctx, resp)
 }
@@ -69,6 +74,11 @@ func (c *UserController) SendCode(ctx *gin.Context) {
 	if err != nil {
 		utils.RespondError(ctx, types.CodeSystemError, err.Error())
 		return
+	}
+
+	// 验证码只允许回传到开发环境，生产环境一律不回显（否则注册/重置密码校验形同虚设）
+	if !config.IsDev() {
+		debugCode = ""
 	}
 
 	utils.RespondSuccess(ctx, types.SendCodeResponse{ExpiresIn: expiresIn, DebugCode: debugCode})
@@ -290,7 +300,7 @@ func (c *UserController) ThirdPartyLogin(ctx *gin.Context) {
 
 	resp, err := c.userService.ThirdPartyLogin(&req, ip, userAgent)
 	if err != nil {
-		utils.RespondError(ctx, types.CodeUnauthorized, err.Error())
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
 		return
 	}
 

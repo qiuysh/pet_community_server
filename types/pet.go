@@ -18,8 +18,11 @@ type PetInfo struct {
 	IsSterilized int        `json:"isSterilized"`
 	IsVaccinated int        `json:"isVaccinated"`
 	Status       int        `json:"status"`
-	ViewCount    int        `json:"viewCount"`
-	CreatedAt    string     `json:"createdAt"`
+	Visibility   int        `json:"visibility"`
+	// Accessible 为 false 时表示对当前查看者不可见（帖子关联降级文案）
+	Accessible *bool  `json:"accessible,omitempty"`
+	ViewCount  int    `json:"viewCount"`
+	CreatedAt  string `json:"createdAt"`
 }
 
 type PetCreateRequest struct {
@@ -35,6 +38,7 @@ type PetCreateRequest struct {
 	Bio          string     `json:"bio" binding:"omitempty,max=500"`
 	IsSterilized int        `json:"isSterilized" binding:"omitempty,oneof=0 1"`
 	IsVaccinated int        `json:"isVaccinated" binding:"omitempty,oneof=0 1"`
+	Visibility   *int       `json:"visibility" binding:"omitempty,oneof=0 1 2"`
 }
 
 type PetUpdateRequest struct {
@@ -51,6 +55,7 @@ type PetUpdateRequest struct {
 	IsSterilized *int       `json:"isSterilized" binding:"omitempty,oneof=0 1"`
 	IsVaccinated *int       `json:"isVaccinated" binding:"omitempty,oneof=0 1"`
 	Status       int        `json:"status" binding:"omitempty,oneof=0 1"`
+	Visibility   *int       `json:"visibility" binding:"omitempty,oneof=0 1 2"`
 }
 
 type PetListRequest struct {
@@ -148,7 +153,13 @@ type LostPetInfo struct {
 	Contact      string    `json:"contact"`
 	Status       int       `json:"status"`
 	ViewCount    int       `json:"viewCount"`
+	SharesCount  int       `json:"sharesCount"`
 	CreatedAt    string    `json:"createdAt"`
+}
+
+// LostPetShareResponse 寻宠分享结果；链接由前端拼详情 URL，服务端只负责计数。
+type LostPetShareResponse struct {
+	SharesCount int `json:"sharesCount"`
 }
 
 type LostPetCreateRequest struct {

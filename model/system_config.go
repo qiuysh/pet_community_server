@@ -4,7 +4,7 @@ import "time"
 
 type SystemConfig struct {
 	ID          uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	ConfigKey   string    `gorm:"unique;not null;size:100" json:"configKey"`
+	ConfigKey   string    `gorm:"uniqueIndex:uk_system_config_config_key;not null;size:100" json:"configKey"`
 	ConfigValue string    `gorm:"type:text" json:"configValue"`
 	Description string    `gorm:"size:200" json:"description"`
 	CreatedAt   time.Time `gorm:"not null" json:"createdAt"`

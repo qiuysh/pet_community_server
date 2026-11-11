@@ -68,7 +68,8 @@ func (c *PetController) GetPet(ctx *gin.Context) {
 		return
 	}
 
-	pet, err := c.petService.GetPetByID(uint(petID))
+	viewerID := ctx.GetUint("user_id")
+	pet, err := c.petService.GetPetByID(uint(petID), viewerID)
 	if err != nil {
 		utils.RespondError(ctx, types.CodeNotFound, err.Error())
 		return
@@ -113,7 +114,8 @@ func (c *PetController) ListPets(ctx *gin.Context) {
 		return
 	}
 
-	result, err := c.petService.ListPets(&req)
+	viewerID := ctx.GetUint("user_id")
+	result, err := c.petService.ListPets(&req, viewerID)
 	if err != nil {
 		utils.RespondError(ctx, types.CodeSystemError, err.Error())
 		return
@@ -306,9 +308,10 @@ func (c *PetController) GetPetAlbum(ctx *gin.Context) {
 		return
 	}
 
-	photos, err := c.petService.GetPetAlbum(uint(petID))
+	viewerID := ctx.GetUint("user_id")
+	photos, err := c.petService.GetPetAlbum(uint(petID), viewerID)
 	if err != nil {
-		utils.RespondError(ctx, types.CodeSystemError, err.Error())
+		utils.RespondError(ctx, types.CodeNotFound, err.Error())
 		return
 	}
 
@@ -438,9 +441,10 @@ func (c *PetController) GetGrowthRecords(ctx *gin.Context) {
 		}
 	}
 
-	records, total, err := c.petService.GetGrowthRecords(uint(petID), page, pageSize)
+	viewerID := ctx.GetUint("user_id")
+	records, total, err := c.petService.GetGrowthRecords(uint(petID), viewerID, page, pageSize)
 	if err != nil {
-		utils.RespondError(ctx, types.CodeSystemError, err.Error())
+		utils.RespondError(ctx, types.CodeNotFound, err.Error())
 		return
 	}
 
@@ -565,4 +569,27 @@ func (c *PetController) UpdateLostPetStatus(ctx *gin.Context) {
 	}
 
 	utils.RespondSuccess(ctx, nil)
+}
+
+// RecordLostPetShare 寻宠分享上报（R2）：游客可调；platform 非空才累加计数。
+func (c *PetController) RecordLostPetShare(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeParamError, "ID无效")
+		return
+	}
+
+	var req types.ShareRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		utils.RespondError(ctx, types.CodeParamError, err.Error())
+		return
+	}
+
+	result, err := c.petService.RecordLostPetShare(uint(id), req.Platform)
+	if err != nil {
+		utils.RespondError(ctx, types.CodeBusinessError, err.Error())
+		return
+	}
+	utils.RespondSuccess(ctx, result)
 }

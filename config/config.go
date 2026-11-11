@@ -1,22 +1,139 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config 应用配置（统一从 config.yaml 加载）
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Database  DatabaseConfig  `yaml:"database"`
-	JWT       JWTConfig       `yaml:"jwt"`
-	Scheduler SchedulerConfig `yaml:"scheduler"`
-	Redis     RedisConfig     `yaml:"redis"`
-	RateLimit RateLimitConfig `yaml:"rate_limit"`
+	Server     ServerConfig     `yaml:"server"`
+	Database   DatabaseConfig   `yaml:"database"`
+	JWT        JWTConfig        `yaml:"jwt"`
+	Scheduler  SchedulerConfig  `yaml:"scheduler"`
+	Redis      RedisConfig      `yaml:"redis"`
+	RateLimit  RateLimitConfig  `yaml:"rate_limit"`
+	Storage    StorageConfig    `yaml:"storage"`
+	Admin      AdminConfig      `yaml:"admin"`
+	ThirdParty ThirdPartyConfig `yaml:"third_party"`
+	QRCode     QRCodeConfig     `yaml:"qrcode"`
+}
+
+// QRCodeConfig 活动签到二维码 HMAC 签名配置
+type QRCodeConfig struct {
+	// Secret 签到码签名密钥；留空则启动时随机生成并告警（重启会使旧码失效）
+	Secret string `yaml:"secret"`
+}
+
+// ThirdPartyConfig 第三方登录（微信 / 微博 / QQ）配置。
+// 安全约定：openID 只能由服务端调用平台 OAuth 接口换取，禁止用前端传入的 code 拼装，
+// 否则任何客户端都能伪造任意第三方身份登录。
+type ThirdPartyConfig struct {
+	// DemoMode 演示模式：不调用真实 OAuth，直接用 code 派生稳定 openID。
+	// 仅供本地联调；非 development 环境下会被强制忽略（视为未配置）。
+	DemoMode bool                     `yaml:"demo_mode"`
+	WeChat   ThirdPartyPlatformConfig `yaml:"wechat"`
+	Weibo    ThirdPartyPlatformConfig `yaml:"weibo"`
+	QQ       ThirdPartyPlatformConfig `yaml:"qq"`
+}
+
+// ThirdPartyPlatformConfig 单个第三方平台的 OAuth 配置。
+type ThirdPartyPlatformConfig struct {
+	// AppID / AppSecret 平台分配的客户端凭据，任一为空视为未配置
+	AppID     string `yaml:"app_id"`
+	AppSecret string `yaml:"app_secret"`
+	// RedirectURI 授权回调地址，微信/微博换取 token 时通常需要与申请时一致
+	RedirectURI string `yaml:"redirect_uri"`
+	// TokenURL / UserInfoURL 可选覆盖，便于自建代理或测试打桩；留空用官方地址
+	TokenURL    string `yaml:"token_url"`
+	UserInfoURL string `yaml:"user_info_url"`
+}
+
+// Configured 是否具备发起 OAuth 换取的最小凭据
+func (c ThirdPartyPlatformConfig) Configured() bool {
+	return c.AppID != "" && c.AppSecret != ""
+}
+
+// AdminConfig 初始超级管理员配置（仅在库中没有后台账号时用于首次创建）
+type AdminConfig struct {
+	// InitialUsername 初始超管用户名
+	InitialUsername string `yaml:"initial_username"`
+	// InitialPassword 初始超管口令；留空则随机生成并打印一次到日志
+	InitialPassword string `yaml:"initial_password"`
+}
+
+// 存储驱动：local 本地磁盘；oss / s3 为 S3 兼容对象存储（阿里云 OSS、腾讯云 COS、MinIO 等）
+const (
+	StorageDriverLocal = "local"
+	StorageDriverOSS   = "oss"
+	StorageDriverS3    = "s3"
+)
+
+// DefaultUploadBaseURL 本地驱动的默认对外访问前缀（需与静态路由挂载路径一致）
+const DefaultUploadBaseURL = "/api/v1/uploads"
+
+// DefaultUploadRoot 本地驱动的默认落盘根目录
+const DefaultUploadRoot = "public/uploads"
+
+// StorageConfig 文件存储配置。业务层统一通过 utils.Storage 读写，
+// 切换本地磁盘 / 对象存储只改配置，不改业务代码。
+type StorageConfig struct {
+	// Driver 存储驱动：local | oss | s3
+	Driver string             `yaml:"driver"`
+	Local  LocalStorageConfig `yaml:"local"`
+	OSS    OSSStorageConfig   `yaml:"oss"`
+}
+
+// LocalStorageConfig 本地磁盘驱动配置
+type LocalStorageConfig struct {
+	// Root 落盘根目录（相对进程工作目录，亦可填绝对路径）
+	Root string `yaml:"root"`
+	// BaseURL 对外访问前缀，必须与静态路由挂载路径一致
+	BaseURL string `yaml:"base_url"`
+}
+
+// OSSStorageConfig S3 兼容对象存储配置
+type OSSStorageConfig struct {
+	// Endpoint 对象存储端点，形如 oss-cn-hangzhou.aliyuncs.com 或 127.0.0.1:9000
+	Endpoint string `yaml:"endpoint"`
+	// Region 签名用区域，MinIO 默认 us-east-1
+	Region string `yaml:"region"`
+	// Bucket 桶名
+	Bucket string `yaml:"bucket"`
+	// AccessKeyID / AccessKeySecret 访问密钥
+	AccessKeyID     string `yaml:"access_key_id"`
+	AccessKeySecret string `yaml:"access_key_secret"`
+	// KeyPrefix object key 统一前缀（如 uploads），留空则直放桶根
+	KeyPrefix string `yaml:"key_prefix"`
+	// BaseURL 对外访问域名（CDN / 自定义域名），留空按 endpoint + bucket 自动拼接
+	BaseURL string `yaml:"base_url"`
+	// UseSSL 是否使用 https
+	UseSSL bool `yaml:"use_ssl"`
+	// PathStyle true=路径风格 https://endpoint/bucket/key（MinIO）；
+	// false=虚拟主机风格 https://bucket.endpoint/key（阿里云 OSS / 腾讯云 COS / S3）
+	PathStyle bool `yaml:"path_style"`
+}
+
+// DefaultStorageConfig 存储配置默认值（本地磁盘 + /api/v1/uploads 前缀）
+func DefaultStorageConfig() StorageConfig {
+	return StorageConfig{
+		Driver: StorageDriverLocal,
+		Local: LocalStorageConfig{
+			Root:    DefaultUploadRoot,
+			BaseURL: DefaultUploadBaseURL,
+		},
+		OSS: OSSStorageConfig{
+			KeyPrefix: "uploads",
+			Region:    "us-east-1",
+			UseSSL:    true,
+		},
+	}
 }
 
 // ServerConfig 服务监听相关配置
@@ -24,6 +141,26 @@ type ServerConfig struct {
 	Host    string `yaml:"host"`
 	Port    int    `yaml:"port"`
 	Timeout int    `yaml:"timeout"`
+	// Env 运行环境：development / test / production（缺省按 production 处理）
+	Env string `yaml:"env"`
+}
+
+// IsDev 是否开发环境。开发环境才允许把验证码回传到接口响应，便于联调。
+func IsDev() bool {
+	if Cfg == nil {
+		return false
+	}
+	return isDevEnv(Cfg.Server.Env)
+}
+
+// isDevEnv 判断给定环境名是否为开发环境（Cfg 未就绪时也可用）
+func isDevEnv(env string) bool {
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "dev", "development", "local":
+		return true
+	default:
+		return false
+	}
 }
 
 // DatabaseConfig 数据库配置
@@ -87,6 +224,7 @@ func defaultConfig() Config {
 			PerUserPerRoute: 100,
 			WindowSeconds:   60,
 		},
+		Storage: DefaultStorageConfig(),
 	}
 }
 
@@ -198,6 +336,101 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.RateLimit.PerUserPerRoute <= 0 {
 		cfg.RateLimit.PerUserPerRoute = 100
+	}
+	if err := NormalizeStorageConfig(&cfg.Storage); err != nil {
+		return err
+	}
+	// 演示模式的 openID 由 code 派生，等同可伪造身份，只允许开发环境使用
+	if cfg.ThirdParty.DemoMode && !isDevEnv(cfg.Server.Env) {
+		log.Printf("WARN third_party.demo_mode ignored: only allowed when server.env is development")
+		cfg.ThirdParty.DemoMode = false
+	}
+	return nil
+}
+
+// NormalizeStorageConfig 规范化并校验存储配置（导出便于测试与复用）
+func NormalizeStorageConfig(cfg *StorageConfig) error {
+	cfg.Driver = strings.ToLower(strings.TrimSpace(cfg.Driver))
+	if cfg.Driver == "" {
+		cfg.Driver = StorageDriverLocal
+	}
+	switch cfg.Driver {
+	case StorageDriverLocal, StorageDriverOSS, StorageDriverS3:
+	default:
+		return fmt.Errorf("storage.driver must be one of local/oss/s3, got %q", cfg.Driver)
+	}
+
+	cfg.Local.Root = strings.TrimSpace(cfg.Local.Root)
+	if cfg.Local.Root == "" {
+		cfg.Local.Root = DefaultUploadRoot
+	}
+	cfg.Local.BaseURL = normalizeURLPrefix(cfg.Local.BaseURL, DefaultUploadBaseURL)
+	if err := validateLocalBaseURL(cfg.Local.BaseURL); err != nil {
+		return err
+	}
+
+	if cfg.Driver == StorageDriverLocal {
+		return nil
+	}
+
+	oss := &cfg.OSS
+	oss.Endpoint = strings.TrimSpace(oss.Endpoint)
+	oss.Region = strings.TrimSpace(oss.Region)
+	oss.Bucket = strings.TrimSpace(oss.Bucket)
+	oss.AccessKeyID = strings.TrimSpace(oss.AccessKeyID)
+	oss.AccessKeySecret = strings.TrimSpace(oss.AccessKeySecret)
+	oss.KeyPrefix = strings.Trim(oss.KeyPrefix, "/")
+	oss.BaseURL = strings.TrimSuffix(strings.TrimSpace(oss.BaseURL), "/")
+
+	switch {
+	case oss.Endpoint == "":
+		return errors.New("storage.oss.endpoint is required when storage.driver is oss/s3")
+	case oss.Bucket == "":
+		return errors.New("storage.oss.bucket is required when storage.driver is oss/s3")
+	case oss.AccessKeyID == "" || oss.AccessKeySecret == "":
+		return errors.New("storage.oss.access_key_id / access_key_secret are required when storage.driver is oss/s3")
+	}
+	if oss.Region == "" {
+		oss.Region = "us-east-1"
+	}
+	return nil
+}
+
+// normalizeURLPrefix 规范化 URL 前缀：去尾部斜杠，缺前导斜杠时补齐（绝对地址除外）
+func normalizeURLPrefix(raw, fallback string) string {
+	p := strings.TrimSpace(raw)
+	if p == "" {
+		return fallback
+	}
+	p = strings.TrimRight(p, "/")
+	if p == "" {
+		return fallback
+	}
+	if !strings.HasPrefix(p, "/") && !strings.Contains(p, "://") {
+		p = "/" + p
+	}
+	return p
+}
+
+// validateLocalBaseURL 约束本地对外前缀，避免误配成 /api 导致 CSRF 写接口被整段豁免。
+// 规则：相对路径；末段必须为 uploads（如 /api/v1/uploads、/uploads）。
+func validateLocalBaseURL(baseURL string) error {
+	if strings.Contains(baseURL, "://") {
+		return errors.New("storage.local.base_url must be a relative path (e.g. /api/v1/uploads)")
+	}
+	if !strings.HasPrefix(baseURL, "/") {
+		return fmt.Errorf("storage.local.base_url must start with /, got %q", baseURL)
+	}
+	if strings.Contains(baseURL, "..") {
+		return errors.New("storage.local.base_url must not contain ..")
+	}
+	trimmed := strings.Trim(baseURL, "/")
+	if trimmed == "" {
+		return errors.New("storage.local.base_url is empty")
+	}
+	parts := strings.Split(trimmed, "/")
+	if parts[len(parts)-1] != "uploads" {
+		return fmt.Errorf("storage.local.base_url must end with /uploads (got %q); broader prefixes would bypass CSRF on API writes", baseURL)
 	}
 	return nil
 }

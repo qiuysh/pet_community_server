@@ -29,7 +29,7 @@ func (UserInterest) TableName() string {
 
 type TopicCategory struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"size:50;unique;not null" json:"name"`
+	Name        string    `gorm:"size:50;uniqueIndex:uk_topic_categories_name;not null" json:"name"`
 	Description string    `gorm:"size:200" json:"description"`
 	Icon        string    `gorm:"size:100" json:"icon"`
 	SortOrder   int       `gorm:"default:0" json:"sortOrder"`
@@ -54,7 +54,7 @@ func (TopicParticipant) TableName() string {
 
 type HotKeyword struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	Keyword     string    `gorm:"size:100;unique;not null" json:"keyword"`
+	Keyword     string    `gorm:"size:100;uniqueIndex:uk_hot_keywords_keyword;not null" json:"keyword"`
 	SearchCount int       `gorm:"default:0" json:"searchCount"`
 	Rank        int       `gorm:"column:rank;default:0" json:"rank"`
 	UpdatedAt   time.Time `gorm:"autoUpdateTime" json:"updatedAt"`

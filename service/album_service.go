@@ -7,6 +7,8 @@ import (
 	"pet-community/types"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // AlbumService 活动相册服务
@@ -47,11 +49,14 @@ func (s *AlbumService) UploadPhoto(userID uint, req *types.AlbumPhotoCreateReque
 		return nil, errors.New("只有线下活动才能上传相册照片")
 	}
 
-	// 检查是否已报名（可选）
-	// isRegistered, _ := s.registrationRepo.Exists(req.ActivityID, userID)
-	// if !isRegistered {
-	//     return nil, errors.New("请先报名活动")
-	// }
+	// 相册属于线下活动，只有报名用户才能上传现场照片
+	isRegistered, err := s.registrationRepo.Exists(req.ActivityID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isRegistered {
+		return nil, errors.New("请先报名活动")
+	}
 
 	album := &model.ActivityAlbum{
 		ActivityID:  req.ActivityID,
@@ -215,11 +220,15 @@ func (s *ActivityReviewService) PublishReview(userID uint, req *types.ActivityRe
 	return s.convertToReviewInfo(review)
 }
 
-// GetReview 获取活动回顾
+// GetReview 获取活动回顾。
+// 未发布回顾时返回 (nil, nil)：公开详情页会并行拉取回顾，缺失属于常态，不应 404。
 func (s *ActivityReviewService) GetReview(activityID uint) (*types.ActivityReviewInfo, error) {
 	review, err := s.reviewRepo.GetByActivity(activityID)
 	if err != nil {
-		return nil, errors.New("活动回顾不存在")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
 	}
 
 	return s.convertToReviewInfo(review)

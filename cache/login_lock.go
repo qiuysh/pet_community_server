@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"pet-community/config"
+
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -58,4 +60,19 @@ func ClearLoginFailures(scope string, id uint) {
 	}
 	ctx := context.Background()
 	_ = config.RDB.Del(ctx, keyLoginFail(scope, id), keyLoginLock(scope, id)).Err()
+}
+
+// GetLoginFailureCount 当前连续失败次数（未达锁定阈值时）；Redis 不可用返回 ErrUnavailable。
+func GetLoginFailureCount(scope string, id uint) (int, error) {
+	if !config.RedisEnabled() {
+		return 0, ErrUnavailable
+	}
+	n, err := config.RDB.Get(context.Background(), keyLoginFail(scope, id)).Int()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return n, nil
 }

@@ -129,7 +129,11 @@ func (c *AdminFrontUsersController) BatchBanFrontUsers(ctx *gin.Context) {
 func (c *AdminFrontUsersController) GetFrontUserOperationLogs(ctx *gin.Context) {
 	userID, _ := parseIntDefault(ctx.Query("userId"), 0)
 	action := ctx.Query("action")
-	startTime, endTime := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	startTime, endTime, parseErr := ParseTimeRange(ctx.Query("startTime"), ctx.Query("endTime"))
+	if parseErr != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeParamError, parseErr.Error()))
+		return
+	}
 	page, limit := ParseLimitQuery(ctx, 100)
 	logs, total, err := c.logService.GetFrontUserOperationLogs(uint(userID), action, startTime, endTime, page, limit)
 	if err != nil {

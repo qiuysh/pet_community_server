@@ -6,8 +6,8 @@ import (
 
 type User struct {
 	ID              uint       `gorm:"primaryKey" json:"id"`
-	Phone           string     `gorm:"uniqueIndex;size:20" json:"phone"`
-	Email           string     `gorm:"uniqueIndex;size:100" json:"email"`
+	Phone           string     `gorm:"uniqueIndex:idx_users_phone;size:20" json:"phone"`
+	Email           string     `gorm:"uniqueIndex:idx_users_email;size:100" json:"email"`
 	Password        string     `gorm:"size:255" json:"-"`
 	Nickname        string     `gorm:"size:50;not null" json:"nickname"`
 	Avatar          string     `gorm:"size:255" json:"avatar"`

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"time"
 
@@ -14,7 +16,6 @@ import (
 	"pet-community/repository"
 	"pet-community/router"
 	"pet-community/service"
-	"pet-community/types"
 	"pet-community/utils"
 )
 
@@ -24,62 +25,15 @@ func main() {
 	config.InitRedis()
 	utils.InitRSA(2048)
 
-	if err := config.DB.AutoMigrate(
-		&model.AdminUser{},
-		&model.AdminOperationLog{},
-		&model.AdminLoginLog{},
-		&model.SystemConfig{},
-		&model.SensitiveWord{},
-		&model.UserActivityLog{},
-		&model.UserBehaviorLog{},
-		&model.User{},
-		&model.UserDevice{},
-		&model.VerificationCode{},
-		&model.UserThirdAccount{},
-		&model.SystemNotification{},
-		&model.Announcement{},
-		&model.Pet{},
-		&model.PetBreed{},
-		&model.PetAlbum{},
-		&model.PetGrowthRecord{},
-		&model.LostPet{},
-		&model.Post{},
-		&model.Comment{},
-		&model.Like{},
-		&model.Favorite{},
-		&model.Draft{},
-		&model.Report{},
-		&model.Topic{},
-		&model.ShareRecord{},
-		&model.UserNotification{},
-		&model.Follow{},
-		&model.Block{},
-		&model.Conversation{},
-		&model.Message{},
-		&model.UserLevel{},
-		&model.PointsRecord{},
-		&model.PointsRule{},
-		&model.LevelBenefit{},
-		&model.NotificationSettings{},
-		&model.SearchHistory{},
-		&model.UserInterest{},
-		&model.TopicCategory{},
-		&model.TopicParticipant{},
-		&model.HotKeyword{},
-		&model.Activity{},
-		&model.Registration{},
-		&model.Submission{},
-		&model.Vote{},
-		&model.SignIn{},
-		&model.ActivityAlbum{},
-		&model.ActivityReview{},
-		&model.Adopt{},
-		&model.AdoptionApplication{},
-		&model.AdoptionFollowUp{},
-		&model.Statistics{},
-		&model.AdPosition{},
-		&model.Advertisement{},
-	); err != nil {
+	// 初始化统一存储：本地磁盘 / 对象存储（OSS），由 storage.driver 决定
+	store, err := utils.InitStorage(&config.Cfg.Storage)
+	if err != nil {
+		log.Fatalf("init storage failed: %v", err)
+	}
+	log.Printf("storage driver=%s", store.Driver())
+
+	// 表结构唯一来源见 config.Models()；新增模型记得同步 sql/init/create.sql
+	if err := config.DB.AutoMigrate(config.Models()...); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}
 
@@ -98,6 +52,8 @@ func main() {
 
 	statsRepo := repository.NewStatsRepository(config.DB)
 	postRepo := repository.NewPostRepository(config.DB)
+	// I7 置顶/精选走内容审核域，注入帖子仓储
+	adminReviewSvc.SetPostRepository(postRepo)
 	likeRepo := repository.NewLikeRepository(config.DB)
 	favoriteRepo := repository.NewFavoriteRepository(config.DB)
 	topicRepo := repository.NewTopicRepository(config.DB)
@@ -153,6 +109,7 @@ func main() {
 	draftRepo := repository.NewDraftRepository(config.DB)
 	notificationRepo := repository.NewNotificationRepository(config.DB)
 	followRepo := repository.NewFollowRepository(config.DB)
+	petService.SetFollowRepository(followRepo)
 	userService.SetProfileRepos(followRepo, postRepo, petRepo)
 
 	notificationService := service.NewNotificationService(notificationRepo, followRepo, userRepo)
@@ -160,7 +117,8 @@ func main() {
 
 	postService := service.NewPostService(postRepo, likeRepo, favoriteRepo, topicRepo, userRepo, petRepo)
 	draftService := service.NewDraftService(draftRepo)
-	topicService := service.NewTopicService(topicRepo)
+	topicCategoryRepo := repository.NewTopicCategoryRepository(config.DB)
+	topicService := service.NewTopicService(topicRepo, topicCategoryRepo)
 	commentService := service.NewCommentService(commentRepo, likeRepo, postRepo, userRepo)
 	reportService := service.NewReportService(reportRepo)
 
@@ -183,15 +141,21 @@ func main() {
 
 	searchHistoryRepo := repository.NewSearchHistoryRepository(config.DB)
 	userInterestRepo := repository.NewUserInterestRepository(config.DB)
-	topicCategoryRepo := repository.NewTopicCategoryRepository(config.DB)
 	topicParticipantRepo := repository.NewTopicParticipantRepository(config.DB)
 	hotKeywordRepo := repository.NewHotKeywordRepository(config.DB)
+	adminReviewSvc.SetTopicCategoryRepository(topicCategoryRepo)
 
 	blockService := service.NewBlockService(blockRepo, userRepo)
 	blockService.SetFollowRepository(followRepo)
 	messageService := service.NewMessageService(conversationRepo, messageRepo, userRepo, blockRepo)
 	pointsService := service.NewPointsService(pointsRepo, userLevelRepo, pointsRuleRepo, levelBenefitRepo)
 	notificationSettingsService := service.NewNotificationSettingsService(notificationSettingsRepo)
+	// N8：通知创建侧统一读设置开关过滤
+	notificationService.SetSettingsRepository(notificationSettingsRepo)
+	followService.SetNotificationSettingsRepository(notificationSettingsRepo)
+	adminNotifySvc.SetNotificationSettingsRepository(notificationSettingsRepo)
+	// R4：登录登记未知设备时写安全通知
+	userService.SetNotificationService(notificationService)
 
 	discoveryService := service.NewDiscoveryService(
 		postRepo, userRepo, topicRepo, likeRepo, favoriteRepo, petRepo,
@@ -209,6 +173,7 @@ func main() {
 	commentService.SetBlockRepository(blockRepo)
 	commentService.SetFollowRepository(followRepo)
 	messageService.SetFollowRepository(followRepo)
+	messageService.SetNotificationSettingsRepository(notificationSettingsRepo)
 	followService.SetBlockRepository(blockRepo)
 	followService.SetPointsService(pointsService)
 
@@ -220,11 +185,15 @@ func main() {
 
 	wsService := service.NewWebSocketService()
 	messageService.SetWebSocketService(wsService)
+	// 在线状态以 WebSocket 连接态为准（见 FollowService.GetOnlineStatus）
+	followService.SetPresence(wsService)
 
-	topicRepo.InitDefaultTopics()
-	topicCategoryRepo.InitDefaultCategories()
-	_ = pointsRuleRepo.InitDefaultRules()
-	_ = levelBenefitRepo.InitDefaultBenefits()
+	// 种子数据失败不阻断启动（缺数据不等于服务不可用），但必须留痕：
+	// 静默失败会让「话题广场空着 / 积分规则缺失」变成无从排查的现象。
+	logSeedErr("初始化默认话题", topicRepo.InitDefaultTopics())
+	logSeedErr("初始化话题分类", topicCategoryRepo.InitDefaultCategories())
+	logSeedErr("初始化积分规则", pointsRuleRepo.InitDefaultRules())
+	logSeedErr("初始化等级权益", levelBenefitRepo.InitDefaultBenefits())
 
 	activityRepo := repository.NewActivityRepository(config.DB)
 	registrationRepo := repository.NewRegistrationRepository(config.DB)
@@ -236,7 +205,14 @@ func main() {
 
 	activityService := service.NewActivityService(activityRepo, registrationRepo, submissionRepo, voteRepo, userRepo)
 	registrationService := service.NewRegistrationService(registrationRepo, activityRepo, userRepo)
-	submissionService := service.NewSubmissionService(submissionRepo, activityRepo, registrationRepo, userRepo, voteRepo)
+	submissionService := service.NewSubmissionService(service.SubmissionServiceDeps{
+		SubmissionRepo:   submissionRepo,
+		ActivityRepo:     activityRepo,
+		RegistrationRepo: registrationRepo,
+		UserRepo:         userRepo,
+		VoteRepo:         voteRepo,
+		NotificationRepo: notificationRepo,
+	})
 	voteService := service.NewVoteService(voteRepo, submissionRepo, activityRepo, userRepo)
 	signInService := service.NewSignInService(signInRepo, activityRepo, registrationRepo, userRepo)
 	albumService := service.NewAlbumService(albumRepo, activityRepo, registrationRepo, userRepo)
@@ -248,42 +224,51 @@ func main() {
 	applicationRepo := repository.NewAdoptionApplicationRepository(config.DB)
 	followUpRepo := repository.NewAdoptionFollowUpRepository(config.DB)
 	adoptService := service.NewAdoptService(adoptRepo, applicationRepo, followUpRepo, userRepo)
+	// R6：回访提交后通知对方
+	adoptService.SetNotificationRepository(notificationRepo)
 	adoptController := controller.NewAdoptController(adoptService)
 
 	frontAdController := controller.NewFrontAdController(adService)
+	siteController := controller.NewSiteController(adminConfigSvc)
+
+	uploadService := service.NewUploadService()
+	uploadController := controller.NewUploadController(uploadService)
 
 	r := gin.Default()
-	r.Static("/uploads", "./public/uploads")
+	mountUploadRoutes(r)
 
+	middleware.SetUploadPrefix(config.Cfg.Storage.Local.BaseURL)
 	middleware.SetLogService(logService)
 	r.Use(middleware.UserBehaviorLogMiddleware())
 	r.Use(middleware.CSRFMiddleware())
 	r.Use(middleware.RateLimitMiddleware())
 
-	r.GET("/health", adminCtrls.Auth.HealthCheck)
-	r.GET("/api/v1/csrf-token", middleware.IssueCSRFToken)
-	r.GET("/api/v1/public-key", func(c *gin.Context) {
-		c.JSON(200, types.SuccessResponse(gin.H{
-			"publicKey": utils.GetPublicKey(),
-		}))
+	// 路由表统一由 router.RegisterRoutes 注册，契约测试复用同一入口
+	router.RegisterRoutes(r, router.Handlers{
+		Admin:                adminCtrls,
+		User:                 userController,
+		Pet:                  petController,
+		Post:                 postController,
+		Notification:         notificationController,
+		Follow:               followController,
+		Block:                blockController,
+		Message:              messageController,
+		Points:               pointsController,
+		NotificationSettings: notificationSettingsController,
+		Discovery:            discoveryController,
+		Activity:             activityController,
+		Adopt:                adoptController,
+		FrontAd:              frontAdController,
+		Site:                 siteController,
+		Upload:               uploadController,
 	})
+
+	// WebSocket 入口带运行时状态，单独挂载
 	r.GET("/ws", middleware.WebSocketAuthMiddleware(), func(c *gin.Context) {
 		wsService.ServeWS(c.Writer, c.Request)
 	})
 
 	startSchedulers(statsService, adminNotifySvc, postService, adService)
-
-	apiV1 := r.Group("/api/v1")
-	router.RegisterAdminRoutes(r, adminCtrls)
-	router.SetupUserRoutes(apiV1, userController)
-	router.SetupPetRoutes(apiV1, petController)
-	router.SetupPostRoutes(apiV1, postController)
-	router.SetupNotificationRoutes(apiV1, notificationController, followController)
-	router.SetupSocialRoutes(apiV1, blockController, messageController, pointsController, notificationSettingsController, followController)
-	router.SetupDiscoveryRoutes(apiV1, discoveryController)
-	router.SetupActivityRoutes(apiV1, activityController)
-	router.SetupAdoptRoutes(apiV1, adoptController)
-	router.SetupAdRoutes(apiV1, frontAdController)
 
 	addr := config.Cfg.Addr()
 	log.Printf("server listening on %s", addr)
@@ -292,24 +277,56 @@ func main() {
 	}
 }
 
+// mountUploadRoutes 挂载上传文件的静态访问路由。
+// 仅本地驱动需要挂载（对象存储由 bucket 域名直接提供访问）；
+// 挂载路径取自 storage.local.base_url（默认 /api/v1/uploads），需与生成的 URL 前缀一致。
+func mountUploadRoutes(r *gin.Engine) {
+	if config.Cfg.Storage.Driver != config.StorageDriverLocal {
+		return
+	}
+	r.Static(config.Cfg.Storage.Local.BaseURL, config.Cfg.Storage.Local.Root)
+}
+
 func ensureDefaultAdmin() {
 	var count int64
 	config.DB.Model(&model.AdminUser{}).Count(&count)
 	if count > 0 {
 		return
 	}
-	hashedPassword, err := utils.HashPassword("admin123")
+
+	username := config.Cfg.Admin.InitialUsername
+	if username == "" {
+		username = "admin"
+	}
+	// 口令不再硬编码：配置留空时随机生成，并在日志里打印一次供首次登录后修改
+	password := config.Cfg.Admin.InitialPassword
+	generated := false
+	if password == "" {
+		buf := make([]byte, 9)
+		if _, err := rand.Read(buf); err != nil {
+			log.Fatalf("generate admin password: %v", err)
+		}
+		password = hex.EncodeToString(buf)
+		generated = true
+	}
+
+	hashedPassword, err := utils.HashPassword(password)
 	if err != nil {
 		log.Fatalf("hash default admin password: %v", err)
 	}
 	if err := config.DB.Create(&model.AdminUser{
-		Username: "admin",
+		Username: username,
 		Password: hashedPassword,
 		Email:    "admin@petcommunity.com",
 		Role:     "super_admin",
 		Status:   1,
 	}).Error; err != nil {
 		log.Fatalf("create default admin: %v", err)
+	}
+	if generated {
+		log.Printf("已创建初始超级管理员 %s，随机口令：%s（请登录后立即修改）", username, password)
+	} else {
+		log.Printf("已按 config.yaml 的 admin 配置创建初始超级管理员 %s", username)
 	}
 }
 
@@ -348,5 +365,12 @@ func startSchedulers(
 func mustAddCron(c *cron.Cron, name, expr string, fn func()) {
 	if _, err := c.AddFunc(expr, fn); err != nil {
 		log.Fatalf("invalid %s %q: %v", name, expr, err)
+	}
+}
+
+// logSeedErr 记录种子数据初始化失败，不阻断启动。
+func logSeedErr(action string, err error) {
+	if err != nil {
+		log.Printf("[warn] %s失败（服务继续启动，相关功能可能不可用）: %v", action, err)
 	}
 }

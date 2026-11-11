@@ -471,9 +471,15 @@ func TestTopicService(t *testing.T) {
 	testutil.SetGlobalDB(db)
 
 	topicRepo := repository.NewTopicRepository(db)
-	srv := service.NewTopicService(topicRepo)
+	topicCategoryRepo := repository.NewTopicCategoryRepository(db)
+	srv := service.NewTopicService(topicRepo, topicCategoryRepo)
 
 	db.Create(&model.UserLevel{UserID: 1, Level: 5, Points: 800, TotalPoints: 800})
+	db.Create(&model.TopicCategory{ID: 1, Name: "萌宠日常", Status: 1, SortOrder: 1})
+	// Status=0 不能靠 Create 结构体写入（gorm default:1 会吃掉零值），先建再 Update
+	disabled := &model.TopicCategory{ID: 2, Name: "已停用", SortOrder: 2}
+	db.Create(disabled)
+	db.Model(disabled).Update("status", 0)
 
 	t.Run("create", func(t *testing.T) {
 		info, err := srv.CreateTopic(1, &types.TopicCreateRequest{
@@ -488,6 +494,49 @@ func TestTopicService(t *testing.T) {
 		}
 		if info.Status != 0 {
 			t.Errorf("expected pending status 0, got %d", info.Status)
+		}
+		if info.CategoryID != 0 {
+			t.Errorf("expected uncategorized 0, got %d", info.CategoryID)
+		}
+	})
+
+	t.Run("create with category", func(t *testing.T) {
+		info, err := srv.CreateTopic(1, &types.TopicCreateRequest{
+			Name:       "#CatTopic",
+			CategoryID: 1,
+		})
+		if err != nil {
+			t.Fatalf("create topic with category failed: %v", err)
+		}
+		if info.CategoryID != 1 {
+			t.Fatalf("expected categoryId=1, got %d", info.CategoryID)
+		}
+		stored, err := topicRepo.GetByID(info.ID)
+		if err != nil {
+			t.Fatalf("reload topic: %v", err)
+		}
+		if stored.CategoryID != 1 {
+			t.Fatalf("persisted categoryId=%d, want 1", stored.CategoryID)
+		}
+	})
+
+	t.Run("invalid category", func(t *testing.T) {
+		_, err := srv.CreateTopic(1, &types.TopicCreateRequest{
+			Name:       "#BadCat",
+			CategoryID: 999,
+		})
+		if err == nil {
+			t.Fatal("expected error for missing category")
+		}
+	})
+
+	t.Run("disabled category", func(t *testing.T) {
+		_, err := srv.CreateTopic(1, &types.TopicCreateRequest{
+			Name:       "#DisabledCat",
+			CategoryID: 2,
+		})
+		if err == nil {
+			t.Fatal("expected error for disabled category")
 		}
 	})
 

@@ -20,6 +20,7 @@ type Pet struct {
 	IsSterilized int        `gorm:"default:0" json:"isSterilized"`
 	IsVaccinated int        `gorm:"default:0" json:"isVaccinated"`
 	Status       int        `gorm:"default:1" json:"status"`
+	Visibility   int        `gorm:"default:0;index" json:"visibility"` // 0公开 1仅粉丝 2仅自己（与动态口径一致）
 	ViewCount    int        `gorm:"default:0" json:"viewCount"`
 	CreatedAt    time.Time  `gorm:"autoCreateTime" json:"createdAt"`
 	UpdatedAt    time.Time  `gorm:"autoUpdateTime" json:"updatedAt"`
@@ -92,6 +93,7 @@ type LostPet struct {
 	Contact      string    `gorm:"size:100;not null" json:"contact"`
 	Status       int       `gorm:"default:1" json:"status"`
 	ViewCount    int       `gorm:"default:0" json:"viewCount"`
+	SharesCount  int       `gorm:"default:0" json:"sharesCount"` // 选择平台后累加，与帖子/话题分享数同口径
 	CreatedAt    time.Time `gorm:"autoCreateTime" json:"createdAt"`
 	UpdatedAt    time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
 }

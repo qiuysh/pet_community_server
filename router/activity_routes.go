@@ -68,6 +68,8 @@ func SetupActivityRoutes(r *gin.RouterGroup, activityController *controller.Acti
 			// 签到认证路由
 			auth.GET("/:id/qrcode", activityController.GenerateQRCode)
 			auth.POST("/:id/sign-in", activityController.SignIn)
+			// 签到统计属于参与者可见信息，登录用户即可读取；管理端另有 /admin 同名路由（含角色校验）
+			auth.GET("/:id/sign-ins/stats", activityController.GetSignInStats)
 			// 相册认证路由
 			auth.POST("/:id/album/photos", activityController.UploadPhoto)
 			auth.DELETE("/:id/album/photos/:photoId", activityController.DeletePhoto)

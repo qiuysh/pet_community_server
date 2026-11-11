@@ -8,6 +8,7 @@ import (
 	"pet-community/repository"
 	"pet-community/service"
 	"pet-community/tests/testutil"
+	"pet-community/types"
 )
 
 func TestFollowServiceToggleFollow(t *testing.T) {
@@ -367,10 +368,24 @@ func TestNotificationSettingsService(t *testing.T) {
 		if settings.LikeNotify != 1 {
 			t.Errorf("expected like notify 1, got %d", settings.LikeNotify)
 		}
+		if settings.MessageNotify != 1 {
+			t.Errorf("expected message notify 1, got %d", settings.MessageNotify)
+		}
+		if settings.SecurityNotify != 1 {
+			t.Errorf("expected security notify 1, got %d", settings.SecurityNotify)
+		}
 	})
 
 	t.Run("update", func(t *testing.T) {
-		err := srv.UpdateSettings(1, 0, 0, 0, 0, 0)
+		err := srv.UpdateSettings(1, &types.NotificationSettingsUpdateRequest{
+			LikeNotify:     0,
+			CommentNotify:  0,
+			AtNotify:       0,
+			FollowNotify:   0,
+			SystemNotify:   0,
+			MessageNotify:  1,
+			SecurityNotify: 1,
+		})
 		if err != nil {
 			t.Fatalf("update settings failed: %v", err)
 		}
@@ -378,5 +393,72 @@ func TestNotificationSettingsService(t *testing.T) {
 		if settings.LikeNotify != 0 {
 			t.Errorf("expected like notify 0, got %d", settings.LikeNotify)
 		}
+		if settings.MessageNotify != 1 {
+			t.Errorf("expected message notify 1, got %d", settings.MessageNotify)
+		}
+		if settings.SecurityNotify != 1 {
+			t.Errorf("expected security notify 1, got %d", settings.SecurityNotify)
+		}
 	})
+}
+
+// TestNotifyAllowed 通知开关过滤（N8）：关闭后不创建通知，开启/未配置/仓储缺失时放行。
+func TestNotifyAllowed(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+
+	settingsRepo := repository.NewNotificationSettingsRepository(db)
+	userRepo := repository.NewUserRepository(db)
+	notificationRepo := repository.NewNotificationRepository(db)
+	srv := service.NewNotificationService(notificationRepo, nil, userRepo)
+	srv.SetSettingsRepository(settingsRepo)
+
+	// 触发者与接收者（sqlite 下 phone 为唯一索引，空串会撞唯一约束，需给不同值）
+	trigger := &model.User{Nickname: "触发者", Email: "t1@example.com", Phone: "13000000001"}
+	target := &model.User{Nickname: "接收者", Email: "r1@example.com", Phone: "13000000002"}
+	if err := db.Create(trigger).Error; err != nil {
+		t.Fatalf("create trigger user failed: %v", err)
+	}
+	if err := db.Create(target).Error; err != nil {
+		t.Fatalf("create target user failed: %v", err)
+	}
+
+	// 未配置：默认放行
+	if err := srv.CreateLikeNotification(trigger.ID, target.ID, "post", 1); err != nil {
+		t.Fatalf("create like notification failed: %v", err)
+	}
+
+	// 关闭点赞通知：不再创建（N8-02）
+	settingsService := service.NewNotificationSettingsService(settingsRepo)
+	if err := settingsService.UpdateSettings(target.ID, &types.NotificationSettingsUpdateRequest{
+		LikeNotify: 0, CommentNotify: 1, AtNotify: 1, FollowNotify: 1, SystemNotify: 1, MessageNotify: 1, SecurityNotify: 1,
+	}); err != nil {
+		t.Fatalf("update settings failed: %v", err)
+	}
+	if err := srv.CreateLikeNotification(trigger.ID, target.ID, "post", 1); err != nil {
+		t.Fatalf("create like notification failed: %v", err)
+	}
+
+	var count int64
+	db.Model(&model.UserNotification{}).Where("user_id = ? AND type = ?", target.ID, "like").Count(&count)
+	if count != 1 {
+		t.Errorf("expected 1 like notification (second one filtered), got %d", count)
+	}
+
+	// 仓储未注入（nil）：放行
+	if !service.NotifyAllowed(nil, target.ID, "like") {
+		t.Error("expected allowed when repo is nil")
+	}
+
+	// N8-07：私信提醒开关独立控制，关闭只影响 message，不影响其他类型
+	if err := settingsService.UpdateSettings(target.ID, &types.NotificationSettingsUpdateRequest{
+		LikeNotify: 1, CommentNotify: 1, AtNotify: 1, FollowNotify: 1, SystemNotify: 1, MessageNotify: 0, SecurityNotify: 1,
+	}); err != nil {
+		t.Fatalf("update settings failed: %v", err)
+	}
+	if service.NotifyAllowed(settingsRepo, target.ID, "message") {
+		t.Error("expected message notify disabled")
+	}
+	if !service.NotifyAllowed(settingsRepo, target.ID, "like") {
+		t.Error("expected like notify still allowed")
+	}
 }

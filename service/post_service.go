@@ -12,6 +12,7 @@ import (
 	"pet-community/model"
 	"pet-community/repository"
 	"pet-community/types"
+	"pet-community/utils"
 
 	"gorm.io/gorm"
 )
@@ -357,7 +358,7 @@ func (s *PostService) ListPosts(viewerID, authorID, topicID, petID uint, postTyp
 	for i := range postInfos {
 		postInfos[i].IsLiked = likeMap[postInfos[i].ID]
 		postInfos[i].IsFavorited = favMap[postInfos[i].ID]
-		s.enrichPostInfoBasic(&postInfos[i])
+		s.enrichPostInfoBasic(viewerID, &postInfos[i])
 	}
 
 	return &types.PostListResponse{
@@ -401,7 +402,7 @@ func (s *PostService) GetLikedPosts(userID uint, page, pageSize int) (*types.Pos
 	}
 	for i := range postInfos {
 		postInfos[i].IsFavorited = favMap[postInfos[i].ID]
-		s.enrichPostInfoBasic(&postInfos[i])
+		s.enrichPostInfoBasic(userID, &postInfos[i])
 	}
 
 	return &types.PostListResponse{
@@ -571,7 +572,7 @@ func (s *PostService) GetFavorites(userID uint, page, pageSize int) (*types.Post
 			if err == nil && post.Status == 1 {
 				info := s.convertToPostInfo(post)
 				info.IsFavorited = true
-				s.enrichPostInfoBasic(info)
+				s.enrichPostInfoBasic(userID, info)
 				postInfos = append(postInfos, *info)
 			}
 		}
@@ -635,7 +636,11 @@ func (s *PostService) CancelScheduleToDraft(userID, postID uint) (*types.DraftIn
 		return nil, err
 	}
 	if err := s.postRepo.Delete(postID); err != nil {
-		_ = s.draftRepo.Delete(draft.ID)
+		// 补偿：撤销刚建的草稿。补偿失败会留下一条幽灵草稿（用户看到「已取消」却没进草稿箱），
+		// 但主操作已失败，返回值不能被补偿结果覆盖，只能留痕供排查。
+		if rollbackErr := s.draftRepo.Delete(draft.ID); rollbackErr != nil {
+			utils.LogError(rollbackErr, "CancelScheduledPost rollback draft")
+		}
 		return nil, err
 	}
 
@@ -737,7 +742,7 @@ func (s *PostService) convertToPostInfo(post *model.Post) *types.PostInfo {
 }
 
 func (s *PostService) enrichPostInfo(userID uint, info *types.PostInfo) {
-	s.enrichPostInfoBasic(info)
+	s.enrichPostInfoBasic(userID, info)
 
 	if userID > 0 {
 		isLiked, _ := s.likeRepo.Exists(userID, "post", info.ID)
@@ -747,7 +752,7 @@ func (s *PostService) enrichPostInfo(userID uint, info *types.PostInfo) {
 	}
 }
 
-func (s *PostService) enrichPostInfoBasic(info *types.PostInfo) {
+func (s *PostService) enrichPostInfoBasic(viewerID uint, info *types.PostInfo) {
 	user, err := s.userRepo.GetByID(info.UserID)
 	if err == nil {
 		info.UserNickname = user.Nickname
@@ -776,13 +781,25 @@ func (s *PostService) enrichPostInfoBasic(info *types.PostInfo) {
 		var petInfos []types.PetInfo
 		for _, petID := range info.PetIDs {
 			pet, err := s.petRepo.GetByID(petID)
-			if err == nil {
+			if err != nil {
+				continue
+			}
+			isFollower := false
+			if s.followRepo != nil && viewerID > 0 {
+				isFollower, _ = s.followRepo.ExistsPublic(viewerID, pet.UserID)
+			}
+			if CanViewPost(viewerID, pet.UserID, pet.Visibility, isFollower) {
+				accessible := true
 				petInfos = append(petInfos, types.PetInfo{
-					ID:     pet.ID,
-					UserID: pet.UserID,
-					Name:   pet.Name,
-					Avatar: pet.Avatar,
+					ID:         pet.ID,
+					UserID:     pet.UserID,
+					Name:       pet.Name,
+					Avatar:     pet.Avatar,
+					Visibility: pet.Visibility,
+					Accessible: &accessible,
 				})
+			} else {
+				petInfos = append(petInfos, HiddenPetInfo(pet.ID))
 			}
 		}
 		info.Pets = petInfos
@@ -977,11 +994,18 @@ func (s *DraftService) convertToDraftInfo(draft *model.Draft) *types.DraftInfo {
 }
 
 type TopicService struct {
-	topicRepo *repository.TopicRepository
+	topicRepo         *repository.TopicRepository
+	topicCategoryRepo *repository.TopicCategoryRepository
 }
 
-func NewTopicService(topicRepo *repository.TopicRepository) *TopicService {
-	return &TopicService{topicRepo: topicRepo}
+func NewTopicService(
+	topicRepo *repository.TopicRepository,
+	topicCategoryRepo *repository.TopicCategoryRepository,
+) *TopicService {
+	return &TopicService{
+		topicRepo:         topicRepo,
+		topicCategoryRepo: topicCategoryRepo,
+	}
 }
 
 func (s *TopicService) CreateTopic(userID uint, req *types.TopicCreateRequest) (*types.TopicInfo, error) {
@@ -1002,10 +1026,16 @@ func (s *TopicService) CreateTopic(userID uint, req *types.TopicCreateRequest) (
 		return nil, errors.New("话题已存在")
 	}
 
+	categoryID, err := resolveTopicCategoryID(s.topicCategoryRepo, req.CategoryID)
+	if err != nil {
+		return nil, err
+	}
+
 	topic := &model.Topic{
 		Name:        req.Name,
 		Description: req.Description,
 		Cover:       req.Cover,
+		CategoryID:  categoryID,
 		CreatorID:   userID,
 		Status:      0, // 待审核
 	}
@@ -1075,6 +1105,7 @@ func (s *TopicService) convertToTopicInfo(topic *model.Topic) *types.TopicInfo {
 		Name:        topic.Name,
 		Description: topic.Description,
 		Cover:       topic.Cover,
+		CategoryID:  topic.CategoryID,
 		PostsCount:  topic.PostsCount,
 		Status:      topic.Status,
 	}
@@ -1257,10 +1288,28 @@ func (s *CommentService) CreateComment(userID uint, req *types.CommentCreateRequ
 		}
 	}
 
-	atUsersStr := ""
+	// 与动态一致：正文 `@昵称` 解析 + 请求体 atUsers 合并，避免评论侧只能靠 ID 数组。
+	atIDSet := make(map[uint]struct{})
 	if len(req.AtUsers) > 0 {
-		var userIDStrs []string
 		for _, id := range req.AtUsers {
+			if id > 0 {
+				atIDSet[id] = struct{}{}
+			}
+		}
+	}
+	if s.notificationService != nil && req.Content != "" {
+		for _, id := range s.notificationService.ParseAtUsers(req.Content) {
+			atIDSet[id] = struct{}{}
+		}
+	}
+	atUserIDs := make([]uint, 0, len(atIDSet))
+	for id := range atIDSet {
+		atUserIDs = append(atUserIDs, id)
+	}
+	atUsersStr := ""
+	if len(atUserIDs) > 0 {
+		var userIDStrs []string
+		for _, id := range atUserIDs {
 			userIDStrs = append(userIDStrs, fmt.Sprintf("%d", id))
 		}
 		atUsersStr = strings.Join(userIDStrs, ",")
@@ -1285,6 +1334,11 @@ func (s *CommentService) CreateComment(userID uint, req *types.CommentCreateRequ
 			if err := tx.Model(&model.Post{}).Where("id = ?", req.PostID).UpdateColumn("comments_count", gorm.Expr("comments_count + 1")).Error; err != nil {
 				return err
 			}
+		} else {
+			// reply_count 原由 SQL 触发器维护，触发器已移除，改由本事务唯一维护
+			if err := tx.Model(&model.Comment{}).Where("id = ?", parent.ID).UpdateColumn("reply_count", gorm.Expr("reply_count + 1")).Error; err != nil {
+				return err
+			}
 		}
 
 		return nil
@@ -1305,7 +1359,6 @@ func (s *CommentService) CreateComment(userID uint, req *types.CommentCreateRequ
 			}
 		}
 
-		atUserIDs := ParseAtUsersFromString(atUsersStr)
 		if s.notificationService != nil && len(atUserIDs) > 0 {
 			go s.notificationService.SendAtNotifications(userID, "comment", comment.ID, req.Content, atUserIDs)
 		}
@@ -1349,12 +1402,23 @@ func (s *CommentService) DeleteComment(userID, commentID uint) error {
 	}
 
 	return s.commentRepo.Transaction(func(tx *gorm.DB) error {
+		// parent_id 不再有外键约束（0 是「顶级评论」的哨兵值），子评论需显式删除。
+		// 评论最多两级，删掉直接子级即可。
+		if err := tx.Where("parent_id = ?", comment.ID).Delete(&model.Comment{}).Error; err != nil {
+			return err
+		}
+
 		if err := tx.Delete(comment).Error; err != nil {
 			return err
 		}
 
 		if comment.ParentID == 0 {
 			if err := tx.Model(&model.Post{}).Where("id = ?", comment.PostID).UpdateColumn("comments_count", gorm.Expr("comments_count - 1")).Error; err != nil {
+				return err
+			}
+		} else {
+			// 与创建时对称：回复被删时回退父评论的 reply_count
+			if err := tx.Model(&model.Comment{}).Where("id = ?", comment.ParentID).UpdateColumn("reply_count", gorm.Expr("reply_count - 1")).Error; err != nil {
 				return err
 			}
 		}

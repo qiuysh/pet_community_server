@@ -2,15 +2,18 @@ package tests
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"pet-community/config"
 	"pet-community/model"
 	"pet-community/repository"
 	"pet-community/service"
 	"pet-community/tests/testutil"
 	"pet-community/types"
+	"pet-community/utils"
 )
 
 func TestPetServiceCreatePet(t *testing.T) {
@@ -68,7 +71,7 @@ func TestPetServiceGetPetByID(t *testing.T) {
 	db.Create(pet)
 
 	t.Run("success", func(t *testing.T) {
-		info, err := srv.GetPetByID(pet.ID)
+		info, err := srv.GetPetByID(pet.ID, 0)
 		if err != nil {
 			t.Fatalf("get pet failed: %v", err)
 		}
@@ -78,7 +81,7 @@ func TestPetServiceGetPetByID(t *testing.T) {
 	})
 
 	t.Run("not found", func(t *testing.T) {
-		_, err := srv.GetPetByID(9999)
+		_, err := srv.GetPetByID(9999, 0)
 		if err == nil {
 			t.Error("expected error for non-existent pet")
 		}
@@ -197,7 +200,7 @@ func TestPetServiceListPets(t *testing.T) {
 	db.Create(&model.Pet{UserID: 2, Name: "Luna", PetType: 2, Status: 1})
 
 	t.Run("list all", func(t *testing.T) {
-		resp, err := srv.ListPets(&types.PetListRequest{Page: 1, PageSize: 10})
+		resp, err := srv.ListPets(&types.PetListRequest{Page: 1, PageSize: 10}, 0)
 		if err != nil {
 			t.Fatalf("list pets failed: %v", err)
 		}
@@ -207,7 +210,7 @@ func TestPetServiceListPets(t *testing.T) {
 	})
 
 	t.Run("filter by user", func(t *testing.T) {
-		resp, err := srv.ListPets(&types.PetListRequest{UserID: 1, Page: 1, PageSize: 10})
+		resp, err := srv.ListPets(&types.PetListRequest{UserID: 1, Page: 1, PageSize: 10}, 0)
 		if err != nil {
 			t.Fatalf("list pets failed: %v", err)
 		}
@@ -217,7 +220,7 @@ func TestPetServiceListPets(t *testing.T) {
 	})
 
 	t.Run("filter by keyword", func(t *testing.T) {
-		resp, err := srv.ListPets(&types.PetListRequest{Keyword: "Buddy", Page: 1, PageSize: 10})
+		resp, err := srv.ListPets(&types.PetListRequest{Keyword: "Buddy", Page: 1, PageSize: 10}, 0)
 		if err != nil {
 			t.Fatalf("list pets failed: %v", err)
 		}
@@ -227,7 +230,7 @@ func TestPetServiceListPets(t *testing.T) {
 	})
 
 	t.Run("filter by type", func(t *testing.T) {
-		resp, err := srv.ListPets(&types.PetListRequest{PetType: 2, Page: 1, PageSize: 10})
+		resp, err := srv.ListPets(&types.PetListRequest{PetType: 2, Page: 1, PageSize: 10}, 0)
 		if err != nil {
 			t.Fatalf("list pets failed: %v", err)
 		}
@@ -268,9 +271,28 @@ func TestPetServiceGetBreeds(t *testing.T) {
 	})
 }
 
+// useTempStorage 把存储指向临时目录，避免测试把文件写进仓库
+func useTempStorage(t *testing.T, prefix string) string {
+	t.Helper()
+	root := t.TempDir()
+	st, err := utils.NewStorage(&config.StorageConfig{
+		Driver: config.StorageDriverLocal,
+		Local:  config.LocalStorageConfig{Root: root, BaseURL: prefix},
+	})
+	if err != nil {
+		t.Fatalf("new storage: %v", err)
+	}
+	prev := utils.CurrentStorage()
+	utils.SetStorage(st)
+	t.Cleanup(func() { utils.SetStorage(prev) })
+	return root
+}
+
 func TestPetServiceUploadAlbumPhoto(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	srv := service.NewPetService(repository.NewPetRepository(db))
+	root := useTempStorage(t, "/api/v1/uploads")
+	wantPrefix := "/api/v1/uploads/" + utils.CategoryPetAlbum + "/"
 
 	t.Run("reject invalid ext", func(t *testing.T) {
 		_, err := srv.UploadAlbumPhoto(strings.NewReader("fake"), "exe")
@@ -284,16 +306,21 @@ func TestPetServiceUploadAlbumPhoto(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upload failed: %v", err)
 		}
-		if !strings.HasPrefix(url, "/uploads/pet-album/") {
+		if !strings.HasPrefix(url, wantPrefix) {
 			t.Fatalf("unexpected url: %s", url)
 		}
-		_ = os.Remove("public" + url)
+		objPath := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(url, "/api/v1/uploads/")))
+		if _, err := os.Stat(objPath); err != nil {
+			t.Fatalf("object not persisted: %v", err)
+		}
 	})
 }
 
 func TestPetServiceUploadAlbumVideo(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	srv := service.NewPetService(repository.NewPetRepository(db))
+	root := useTempStorage(t, "/api/v1/uploads")
+	wantPrefix := "/api/v1/uploads/" + utils.CategoryPetAlbum + "/"
 
 	t.Run("reject non-mp4", func(t *testing.T) {
 		_, err := srv.UploadAlbumVideo(strings.NewReader("fake"), "avi")
@@ -307,10 +334,13 @@ func TestPetServiceUploadAlbumVideo(t *testing.T) {
 		if err != nil {
 			t.Fatalf("upload failed: %v", err)
 		}
-		if !strings.HasPrefix(url, "/uploads/pet-album/") {
+		if !strings.HasPrefix(url, wantPrefix) {
 			t.Fatalf("unexpected url: %s", url)
 		}
-		_ = os.Remove("public" + url)
+		objPath := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(url, "/api/v1/uploads/")))
+		if _, err := os.Stat(objPath); err != nil {
+			t.Fatalf("object not persisted: %v", err)
+		}
 	})
 }
 
@@ -332,7 +362,7 @@ func TestPetServiceReorderAlbum(t *testing.T) {
 		if err := srv.ReorderAlbum(1, pet.ID, []uint{a.ID, c.ID, b.ID}); err != nil {
 			t.Fatalf("reorder failed: %v", err)
 		}
-		list, err := srv.GetPetAlbum(pet.ID)
+		list, err := srv.GetPetAlbum(pet.ID, 0)
 		if err != nil {
 			t.Fatalf("get album failed: %v", err)
 		}
@@ -384,7 +414,7 @@ func TestPetServiceAlbum(t *testing.T) {
 	})
 
 	t.Run("get album", func(t *testing.T) {
-		photos, err := srv.GetPetAlbum(pet.ID)
+		photos, err := srv.GetPetAlbum(pet.ID, 0)
 		if err != nil {
 			t.Fatalf("get pet album failed: %v", err)
 		}
@@ -550,7 +580,7 @@ func TestPetServiceGetGrowthRecords(t *testing.T) {
 	db.Create(&model.PetGrowthRecord{PetID: pet.ID, RecordDate: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), Title: "A"})
 	db.Create(&model.PetGrowthRecord{PetID: pet.ID, RecordDate: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), Title: "B"})
 
-	records, total, err := srv.GetGrowthRecords(pet.ID, 1, 10)
+	records, total, err := srv.GetGrowthRecords(pet.ID, 0, 1, 10)
 	if err != nil {
 		t.Fatalf("get growth records failed: %v", err)
 	}
@@ -657,6 +687,57 @@ func TestPetServiceListLostPets(t *testing.T) {
 	})
 }
 
+func TestPetServiceRecordLostPetShare(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+
+	petRepo := repository.NewPetRepository(db)
+	srv := service.NewPetService(petRepo)
+
+	lostPet := &model.LostPet{
+		UserID:       1,
+		PetName:      "Buddy",
+		PetType:      1,
+		Description:  "Lost",
+		LostLocation: "Beijing",
+		LostTime:     time.Now(),
+		Contact:      "13800138000",
+		Status:       1,
+	}
+	db.Create(lostPet)
+
+	t.Run("platform increments shares_count", func(t *testing.T) {
+		resp, err := srv.RecordLostPetShare(lostPet.ID, "weibo")
+		if err != nil {
+			t.Fatalf("record lost pet share failed: %v", err)
+		}
+		if resp.SharesCount != 1 {
+			t.Fatalf("expected shares count 1, got %d", resp.SharesCount)
+		}
+		updated, _ := petRepo.GetLostPetByID(lostPet.ID)
+		if updated.SharesCount != 1 {
+			t.Fatalf("expected persisted shares count 1, got %d", updated.SharesCount)
+		}
+	})
+
+	t.Run("empty platform does not increment", func(t *testing.T) {
+		before, _ := petRepo.GetLostPetByID(lostPet.ID)
+		resp, err := srv.RecordLostPetShare(lostPet.ID, "  ")
+		if err != nil {
+			t.Fatalf("record lost pet share failed: %v", err)
+		}
+		if resp.SharesCount != before.SharesCount {
+			t.Fatalf("expected shares count unchanged %d, got %d", before.SharesCount, resp.SharesCount)
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		_, err := srv.RecordLostPetShare(9999, "link")
+		if err == nil {
+			t.Fatal("expected error for missing lost pet")
+		}
+	})
+}
+
 func TestPetServiceUpdateLostPetStatus(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 
@@ -690,6 +771,77 @@ func TestPetServiceUpdateLostPetStatus(t *testing.T) {
 		err := srv.UpdateLostPetStatus(2, lostPet.ID, 3)
 		if err == nil {
 			t.Error("expected error for no permission")
+		}
+	})
+}
+
+func TestPetServiceVisibility(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	petRepo := repository.NewPetRepository(db)
+	followRepo := repository.NewFollowRepository(db)
+	srv := service.NewPetService(petRepo)
+	srv.SetFollowRepository(followRepo)
+
+	ownerID := uint(10)
+	strangerID := uint(20)
+	followerID := uint(30)
+
+	publicPet := &model.Pet{UserID: ownerID, Name: "Public", PetType: 1, Status: 1, Visibility: 0}
+	followerPet := &model.Pet{UserID: ownerID, Name: "FollowersOnly", PetType: 1, Status: 1, Visibility: 1}
+	privatePet := &model.Pet{UserID: ownerID, Name: "Private", PetType: 1, Status: 1, Visibility: 2}
+	db.Create(publicPet)
+	db.Create(followerPet)
+	db.Create(privatePet)
+
+	db.Create(&model.Follow{FollowerID: followerID, FollowingID: ownerID, Status: 1, IsSecret: 0})
+
+	t.Run("guest sees only public", func(t *testing.T) {
+		if _, err := srv.GetPetByID(publicPet.ID, 0); err != nil {
+			t.Fatalf("public should be visible: %v", err)
+		}
+		if _, err := srv.GetPetByID(followerPet.ID, 0); err == nil {
+			t.Fatal("followers pet should 404 for guest")
+		}
+		if _, err := srv.GetPetByID(privatePet.ID, 0); err == nil {
+			t.Fatal("private pet should 404 for guest")
+		}
+	})
+
+	t.Run("stranger cannot see private or followers", func(t *testing.T) {
+		if _, err := srv.GetPetByID(privatePet.ID, strangerID); err == nil {
+			t.Fatal("expected private hidden")
+		}
+		if _, err := srv.GetPetByID(followerPet.ID, strangerID); err == nil {
+			t.Fatal("expected followers-only hidden to stranger")
+		}
+	})
+
+	t.Run("follower can see followers visibility", func(t *testing.T) {
+		if _, err := srv.GetPetByID(followerPet.ID, followerID); err != nil {
+			t.Fatalf("follower should see followers pet: %v", err)
+		}
+		if _, err := srv.GetPetByID(privatePet.ID, followerID); err == nil {
+			t.Fatal("private still hidden to follower")
+		}
+	})
+
+	t.Run("owner sees all", func(t *testing.T) {
+		for _, id := range []uint{publicPet.ID, followerPet.ID, privatePet.ID} {
+			if _, err := srv.GetPetByID(id, ownerID); err != nil {
+				t.Fatalf("owner should see pet %d: %v", id, err)
+			}
+		}
+	})
+
+	t.Run("list filters private for stranger", func(t *testing.T) {
+		resp, err := srv.ListPets(&types.PetListRequest{UserID: ownerID, Page: 1, PageSize: 20}, strangerID)
+		if err != nil {
+			t.Fatalf("list failed: %v", err)
+		}
+		for _, p := range resp.List {
+			if p.ID == privatePet.ID || p.ID == followerPet.ID {
+				t.Fatalf("list leaked non-public pet %d", p.ID)
+			}
 		}
 	})
 }

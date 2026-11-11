@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"strconv"
+
 	"pet-community/service"
 	"pet-community/types"
 
@@ -106,4 +108,55 @@ func (c *AdminReviewController) GetReviewHistory(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(200, types.SuccessResponse(result))
+}
+
+// PostFlagRequest 置顶/精选请求体：value 1=置顶/精选，0=取消。
+type PostFlagRequest struct {
+	Value int `json:"value" binding:"oneof=0 1"`
+}
+
+// PinPost 管理员置顶/取消置顶动态（I7-01）。RBAC: super_admin | content_admin。
+func (c *AdminReviewController) PinPost(ctx *gin.Context) {
+	postID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeParamError, "动态ID无效"))
+		return
+	}
+	var req PostFlagRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeParamError, err.Error()))
+		return
+	}
+	actor, ok := MustGetAdminActor(ctx)
+	if !ok {
+		return
+	}
+	if err := c.adminService.PinPost(uint(postID), req.Value, actor.AdminID, actor.IP); err != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeSystemError, err.Error()))
+		return
+	}
+	ctx.JSON(200, types.SuccessResponse(nil))
+}
+
+// FeaturePost 管理员设置/取消精选动态（I7-02）。RBAC: super_admin | content_admin。
+func (c *AdminReviewController) FeaturePost(ctx *gin.Context) {
+	postID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeParamError, "动态ID无效"))
+		return
+	}
+	var req PostFlagRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeParamError, err.Error()))
+		return
+	}
+	actor, ok := MustGetAdminActor(ctx)
+	if !ok {
+		return
+	}
+	if err := c.adminService.FeaturePost(uint(postID), req.Value, actor.AdminID, actor.IP); err != nil {
+		ctx.JSON(200, types.ErrorResponse(types.CodeSystemError, err.Error()))
+		return
+	}
+	ctx.JSON(200, types.SuccessResponse(nil))
 }

@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"errors"
 	"testing"
 
 	"pet-community/model"
@@ -32,7 +33,7 @@ func TestAdminServiceLogin(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		token, loggedIn, err := srv.Login("admin", "123456", "127.0.0.1", "")
+		token, loggedIn, err := srv.Login("admin", "123456", "127.0.0.1", "", "", "")
 		if err != nil {
 			t.Fatalf("login failed: %v", err)
 		}
@@ -45,7 +46,7 @@ func TestAdminServiceLogin(t *testing.T) {
 	})
 
 	t.Run("wrong password", func(t *testing.T) {
-		_, _, err := srv.Login("admin", "wrongpassword", "127.0.0.1", "")
+		_, _, err := srv.Login("admin", "wrongpassword", "127.0.0.1", "", "", "")
 		if err == nil {
 			t.Error("expected error for wrong password")
 		}
@@ -67,9 +68,71 @@ func TestAdminServiceLogin(t *testing.T) {
 			t.Fatalf("failed to disable admin: %v", err)
 		}
 
-		_, _, err := srv.Login("disabled", "123456", "127.0.0.1", "")
+		_, _, err := srv.Login("disabled", "123456", "127.0.0.1", "", "", "")
 		if err == nil {
 			t.Error("expected error for disabled admin")
+		}
+	})
+}
+
+func TestAdminLoginRequiresCaptchaAfterFailures(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	adminRepo := repository.NewAdminRepository(db)
+	srv := service.NewAdminAuthService(adminRepo)
+	hashedPassword, err := utils.HashPassword("123456")
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	admin := &model.AdminUser{
+		Username:         "captcha-admin",
+		Password:         hashedPassword,
+		Email:            "captcha@example.com",
+		Role:             "admin",
+		Status:           1,
+		FailedLoginCount: 3, // 已达阈值，必须带验证码
+	}
+	if err := db.Create(admin).Error; err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+
+	t.Run("missing captcha when required", func(t *testing.T) {
+		_, _, err := srv.Login("captcha-admin", "123456", "127.0.0.1", "", "", "")
+		if err == nil {
+			t.Fatal("expected captcha required error")
+		}
+		var loginErr *service.AdminLoginError
+		if !errors.As(err, &loginErr) || !loginErr.RequireCaptcha {
+			t.Fatalf("expected RequireCaptcha, got %v", err)
+		}
+	})
+
+	t.Run("wrong captcha rejected", func(t *testing.T) {
+		_, _, err := srv.Login("captcha-admin", "123456", "127.0.0.1", "", "bad-id", "XXXX")
+		if err == nil {
+			t.Fatal("expected captcha invalid error")
+		}
+	})
+
+	t.Run("correct captcha allows login", func(t *testing.T) {
+		// 前面子用例已累加失败次数，这里单独建号避免误触锁定
+		okAdmin := &model.AdminUser{
+			Username:         "captcha-ok",
+			Password:         hashedPassword,
+			Email:            "captcha-ok@example.com",
+			Role:             "admin",
+			Status:           1,
+			FailedLoginCount: 3,
+		}
+		if err := db.Create(okAdmin).Error; err != nil {
+			t.Fatalf("create ok admin: %v", err)
+		}
+		service.SeedAdminCaptchaForTest("test-captcha-id", "AB12")
+		token, loggedIn, err := srv.Login("captcha-ok", "123456", "127.0.0.1", "", "test-captcha-id", "AB12")
+		if err != nil {
+			t.Fatalf("login with captcha failed: %v", err)
+		}
+		if token == "" || loggedIn == nil {
+			t.Fatal("expected token and admin")
 		}
 	})
 }

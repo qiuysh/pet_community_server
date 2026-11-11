@@ -1,31 +1,29 @@
 package service
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
 	"pet-community/model"
 	"pet-community/repository"
 	"pet-community/types"
 	"pet-community/utils"
-	"strconv"
-	"strings"
-	"time"
 
 	"gorm.io/gorm"
 )
 
 // AdoptService 领养服务
 type AdoptService struct {
-	adoptRepo       *repository.AdoptRepository
-	applicationRepo *repository.AdoptionApplicationRepository
-	followUpRepo    *repository.AdoptionFollowUpRepository
-	userRepo        *repository.UserRepository
+	adoptRepo        *repository.AdoptRepository
+	applicationRepo  *repository.AdoptionApplicationRepository
+	followUpRepo     *repository.AdoptionFollowUpRepository
+	userRepo         *repository.UserRepository
+	notificationRepo *repository.NotificationRepository
 }
 
 func NewAdoptService(
@@ -42,6 +40,28 @@ func NewAdoptService(
 	}
 }
 
+// SetNotificationRepository 注入通知仓储，用于回访提交后通知对方（R6）。
+func (s *AdoptService) SetNotificationRepository(notificationRepo *repository.NotificationRepository) {
+	s.notificationRepo = notificationRepo
+}
+
+// nullablePetID 把请求里的宠物ID转成可空指针，0 表示未绑定宠物（写库为 NULL）
+func nullablePetID(petID uint) *uint {
+	if petID == 0 {
+		return nil
+	}
+	id := petID
+	return &id
+}
+
+// petIDValue 取可空宠物ID的值，未绑定时返回 0
+func petIDValue(petID *uint) uint {
+	if petID == nil {
+		return 0
+	}
+	return *petID
+}
+
 // CreateAdopt 创建领养信息
 func (s *AdoptService) CreateAdopt(userID uint, req *types.AdoptCreateRequest) (*types.AdoptInfo, error) {
 	// 校验照片 URL，禁止占位符与未上传的本地预览 URL 入库
@@ -56,7 +76,7 @@ func (s *AdoptService) CreateAdopt(userID uint, req *types.AdoptCreateRequest) (
 	}
 
 	adopt := &model.Adopt{
-		PetID:           req.PetID,
+		PetID:           nullablePetID(req.PetID),
 		UserID:          userID,
 		PetName:         req.PetName,
 		PetType:         req.PetType,
@@ -521,6 +541,7 @@ func (s *AdoptService) GetAdoptionStats() (*types.AdoptionStats, error) {
 //   - "placeholder-url-N" 等前端占位符
 //   - "blob:..." 未上传的本地预览 URL
 //   - "file:..." / "data:..." 本地路径
+//
 // 允许：http://  https://  以及以 / 开头的相对路径（静态资源）
 func validatePhotos(photos []string) error {
 	for i, p := range photos {
@@ -547,8 +568,8 @@ func validatePhotos(photos []string) error {
 	return nil
 }
 
-// UploadAdoptPhoto 上传领养照片（本地磁盘保存，返回可被前端直接访问的 URL）
-// maxSize 单位字节，默认 5MB（2048*1024 的 2x 作为安全边界）
+// UploadAdoptPhoto 上传领养照片（≤5MB），返回可被前端直接访问的 URL。
+// 落盘位置由存储驱动决定（本地磁盘 / 对象存储）
 func (s *AdoptService) UploadAdoptPhoto(file io.Reader, originalExt string) (string, error) {
 	ext := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(originalExt, ".")))
 	switch ext {
@@ -557,37 +578,12 @@ func (s *AdoptService) UploadAdoptPhoto(file io.Reader, originalExt string) (str
 		return "", errors.New("仅支持 jpg/jpeg/png/gif/webp/bmp 格式的图片")
 	}
 
-	uploadDir := filepath.Join("public", "uploads", "adopt")
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建上传目录失败: %w", err)
-	}
-
-	randBytes := make([]byte, 16)
-	if _, err := rand.Read(randBytes); err != nil {
-		return "", fmt.Errorf("生成随机文件名失败: %w", err)
-	}
-	fileName := fmt.Sprintf("%d_%s.%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes), ext)
-	fullPath := filepath.Join(uploadDir, fileName)
-
-	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("保存文件失败: %w", err)
-	}
-	defer f.Close()
-
-	maxSize := utils.MaxPostImageBytes
-	written, err := io.Copy(f, io.LimitReader(file, maxSize+1))
-	if err != nil {
-		_ = os.Remove(fullPath)
-		return "", fmt.Errorf("保存图片数据失败: %w", err)
-	}
-	if written > maxSize {
-		_ = os.Remove(fullPath)
-		return "", errors.New("图片大小不得超过 5MB")
-	}
-
-	urlPath := "/uploads/adopt/" + fileName
-	return urlPath, nil
+	return utils.CurrentStorage().Save(file, utils.SaveOptions{
+		Category: utils.CategoryAdopt,
+		Ext:      ext,
+		MaxSize:  utils.MaxPostImageBytes,
+		Kind:     "图片",
+	})
 }
 
 // convertToAdoptInfo 转换领养信息模型为响应类型
@@ -616,7 +612,7 @@ func (s *AdoptService) convertToAdoptInfo(adopt *model.Adopt, viewerID uint) (*t
 
 	return &types.AdoptInfo{
 		ID:               adopt.ID,
-		PetID:            adopt.PetID,
+		PetID:            petIDValue(adopt.PetID),
 		UserID:           adopt.UserID,
 		UserNickname:     user.Nickname,
 		UserAvatar:       user.Avatar,
@@ -666,7 +662,7 @@ func (s *AdoptService) convertToApplicationInfo(application *model.AdoptionAppli
 	}, nil
 }
 
-// CreateFollowUp 创建领养回访记录
+// CreateFollowUp 创建领养回访记录（R6：送养人与领养人双方均可提交，并通知对方）
 func (s *AdoptService) CreateFollowUp(userID uint, req *types.AdoptionFollowUpCreateRequest) (*types.AdoptionFollowUpInfo, error) {
 	// 验证领养信息是否存在
 	adopt, err := s.adoptRepo.GetByID(req.AdoptionID)
@@ -690,8 +686,10 @@ func (s *AdoptService) CreateFollowUp(userID uint, req *types.AdoptionFollowUpCr
 		return nil, errors.New("申请不属于该领养信息")
 	}
 
-	// 只有发布者可以创建回访记录
-	if adopt.UserID != userID {
+	// 当事双方（送养人=发布者 / 领养人=申请通过者）才可创建回访记录
+	isPublisher := adopt.UserID == userID
+	isAdopter := application.UserID == userID
+	if !isPublisher && !isAdopter {
 		return nil, errors.New("无权创建回访记录")
 	}
 
@@ -715,11 +713,64 @@ func (s *AdoptService) CreateFollowUp(userID uint, req *types.AdoptionFollowUpCr
 		return nil, err
 	}
 
+	// 纯副作用：通知失败不阻断回访提交
+	s.notifyFollowUpCounterpart(userID, adopt, application)
+
 	return s.convertToFollowUpInfo(followUp)
 }
 
-// ListFollowUpsByAdoption 获取领养回访记录列表
-func (s *AdoptService) ListFollowUpsByAdoption(adoptionID uint, page, pageSize int) (*types.AdoptionFollowUpListResponse, error) {
+// notifyFollowUpCounterpart 回访提交后通知另一方：领养人提交 → 通知送养人；送养人提交 → 通知领养人。
+func (s *AdoptService) notifyFollowUpCounterpart(submitterID uint, adopt *model.Adopt, application *model.AdoptionApplication) {
+	if s.notificationRepo == nil {
+		return
+	}
+	targetID := uint(0)
+	if submitterID == application.UserID {
+		targetID = adopt.UserID // 领养人提交，通知送养人
+	} else {
+		targetID = application.UserID // 送养人提交，通知领养人
+	}
+	if targetID == 0 || targetID == submitterID {
+		return
+	}
+	submitter, _ := s.userRepo.GetByID(submitterID)
+	if submitter == nil {
+		return
+	}
+	notification := &model.UserNotification{
+		UserID:        targetID,
+		Type:          "system",
+		Title:         "回访提醒",
+		Content:       fmt.Sprintf("%s 提交了一条领养回访记录", submitter.Nickname),
+		TriggerType:   "adopt",
+		TriggerID:     adopt.ID,
+		TriggerUserID: submitterID,
+	}
+	if err := s.notificationRepo.Create(notification); err != nil {
+		utils.LogError(err, "notify adoption follow-up failed")
+	}
+}
+
+// ListFollowUpsByAdoption 获取领养回访记录列表（R6：仅当事双方可见）
+func (s *AdoptService) ListFollowUpsByAdoption(viewerID, adoptionID uint, page, pageSize int) (*types.AdoptionFollowUpListResponse, error) {
+	// 非当事双方（送养人 / 已通过申请的领养人）不可见
+	adopt, err := s.adoptRepo.GetByID(adoptionID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("领养信息不存在")
+		}
+		return nil, err
+	}
+	allowed := adopt.UserID == viewerID
+	if !allowed && viewerID > 0 {
+		if application, err := s.applicationRepo.GetByAdoptionAndUser(adoptionID, viewerID); err == nil && application != nil {
+			allowed = application.Status == 1
+		}
+	}
+	if !allowed {
+		return nil, errors.New("无权查看回访记录")
+	}
+
 	if page <= 0 {
 		page = 1
 	}

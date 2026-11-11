@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"sync"
 
+	"pet-community/model"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -22,11 +24,25 @@ type WebSocketService struct {
 	messageCh chan *MessagePayload
 }
 
+// OnlinePresence 查询用户当前是否保持着 WebSocket 连接（连接态，而非活跃态）。
+type OnlinePresence interface {
+	IsOnline(userID uint) bool
+}
+
+// IsOnline 是否持有该用户的 WebSocket 连接。
+func (ws *WebSocketService) IsOnline(userID uint) bool {
+	_, ok := ws.clients.Load(userID)
+	return ok
+}
+
 type MessagePayload struct {
-	ToID    uint   `json:"toId"`
-	FromID  uint   `json:"fromId"`
-	Content string `json:"content"`
-	Type    string `json:"type"`
+	ID       uint   `json:"id"`
+	ToID     uint   `json:"toId"`
+	FromID   uint   `json:"fromId"`
+	Content  string `json:"content"`
+	Type     string `json:"type"`
+	MediaURL string `json:"mediaUrl,omitempty"`
+	Duration int    `json:"duration,omitempty"`
 }
 
 func NewWebSocketService() *WebSocketService {
@@ -84,11 +100,18 @@ func (ws *WebSocketService) broadcastToUser(userID uint, payload *MessagePayload
 	}
 }
 
-func (ws *WebSocketService) SendMessage(toID, fromID uint, content, msgType string) {
+// SendMessage 推送完整私信（含媒体字段），供在线接收方即时展示
+func (ws *WebSocketService) SendMessage(msg *model.Message) {
+	if msg == nil {
+		return
+	}
 	ws.messageCh <- &MessagePayload{
-		ToID:    toID,
-		FromID:  fromID,
-		Content: content,
-		Type:    msgType,
+		ID:       msg.ID,
+		ToID:     msg.ToID,
+		FromID:   msg.FromID,
+		Content:  msg.Content,
+		Type:     msg.Type,
+		MediaURL: msg.MediaURL,
+		Duration: msg.Duration,
 	}
 }

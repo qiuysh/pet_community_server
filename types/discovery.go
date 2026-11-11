@@ -68,16 +68,18 @@ type TopicDetailInfo struct {
 	Name              string `json:"name"`
 	Description       string `json:"description"`
 	Cover             string `json:"cover"`
+	CategoryID        uint   `json:"categoryId"`
 	PostsCount        int    `json:"postsCount"`
+	SharesCount       int    `json:"sharesCount"`
 	Status            int    `json:"status"`
 	ParticipantsCount int    `json:"participantsCount"`
 	IsParticipated    bool   `json:"isParticipated"`
 	CreatedAt         string `json:"createdAt"`
 }
 
+// TopicShareResponse 话题分享结果；二维码由前端用 shareUrl 本地渲染，服务端不再返回图像内容。
 type TopicShareResponse struct {
 	ShareURL string `json:"shareUrl"`
-	QRCode   string `json:"qrCode,omitempty"`
 }
 
 type RecommendPostInfo struct {

@@ -258,7 +258,7 @@ func (r *AdoptionFollowUpRepository) ListByAdoption(adoptionID uint, page, pageS
 		return nil, 0, err
 	}
 
-	if err := query.Limit(pageSize).Offset((page - 1) * pageSize).Order("id DESC").Find(&followUps).Error; err != nil {
+	if err := query.Limit(pageSize).Offset((page - 1) * pageSize).Order("created_at DESC, id DESC").Find(&followUps).Error; err != nil {
 		return nil, 0, err
 	}
 

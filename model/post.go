@@ -110,12 +110,13 @@ func (Report) TableName() string {
 
 type Topic struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"size:50;unique;not null" json:"name"`
+	Name        string    `gorm:"size:50;uniqueIndex:uk_topics_name;not null" json:"name"`
 	Description string    `gorm:"size:200" json:"description"`
 	Cover       string    `gorm:"size:255" json:"cover"`
 	CategoryID  uint      `gorm:"index;default:0" json:"categoryId"` // 话题分类（TopicCategory）
 	CreatorID   uint      `gorm:"index;default:0" json:"creatorId"` // 创建者；0 表示系统/运营
 	PostsCount  int       `gorm:"default:0" json:"postsCount"`
+	SharesCount int       `gorm:"default:0" json:"sharesCount"` // 选择平台后累加，与帖子分享数同口径
 	Status      int       `gorm:"default:0;index" json:"status"` // 0待审核 1已通过（Create 须显式写 Status，避免零值被 default 覆盖）
 	CreatedAt   time.Time `gorm:"autoCreateTime" json:"createdAt"`
 }

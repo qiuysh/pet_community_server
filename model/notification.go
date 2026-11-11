@@ -44,7 +44,7 @@ type SystemNotification struct {
 	Content    string     `gorm:"type:text" json:"content"`
 	TargetType int        `gorm:"not null;default:0" json:"targetType"`
 	TargetIDs  string     `gorm:"type:text" json:"targetIds,omitempty"`
-	Status     int        `gorm:"not null;default:1" json:"status"`
+	Status     int        `gorm:"not null;default:0" json:"status"` // 0-草稿 1-已发布（CreateNotification 建即草稿）
 	PublishAt  *time.Time `json:"publishAt,omitempty"`
 	AdminID    uint       `gorm:"not null" json:"adminId"`
 	CreatedAt  time.Time  `gorm:"autoCreateTime" json:"createdAt"`

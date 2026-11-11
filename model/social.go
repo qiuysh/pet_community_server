@@ -32,25 +32,34 @@ func (Conversation) TableName() string {
 }
 
 type Message struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	ConversationID uint      `gorm:"index;not null" json:"conversationId"`
-	FromID         uint      `gorm:"index;not null" json:"fromId"`
-	ToID           uint      `gorm:"index;not null" json:"toId"`
-	Content        string    `gorm:"type:text" json:"content"`
-	Type           string    `gorm:"size:20;default:text" json:"type"`
-	MediaURL       string    `gorm:"size:255" json:"mediaUrl"`
-	Status         int       `gorm:"default:0" json:"status"`
-	IsRecalled     int       `gorm:"default:0" json:"isRecalled"`
-	CreatedAt      time.Time `gorm:"autoCreateTime" json:"createdAt"`
+	ID             uint   `gorm:"primaryKey" json:"id"`
+	ConversationID uint   `gorm:"index;not null" json:"conversationId"`
+	FromID         uint   `gorm:"index;not null" json:"fromId"`
+	ToID           uint   `gorm:"index;not null" json:"toId"`
+	Content        string `gorm:"type:text" json:"content"`
+	Type           string `gorm:"size:20;default:text" json:"type"`
+	MediaURL       string `gorm:"size:255" json:"mediaUrl"`
+	// Duration 语音时长（秒）；非语音消息为 0
+	Duration   int       `gorm:"not null;default:0" json:"duration"`
+	Status     int       `gorm:"default:0" json:"status"`
+	IsRecalled int       `gorm:"default:0" json:"isRecalled"`
+	CreatedAt  time.Time `gorm:"autoCreateTime" json:"createdAt"`
 }
 
 func (Message) TableName() string {
 	return "messages"
 }
 
+// 消息类型（与 messages.type 列一致）
+const (
+	MessageTypeText  = "text"
+	MessageTypeImage = "image"
+	MessageTypeVoice = "voice"
+)
+
 type UserLevel struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	UserID      uint      `gorm:"uniqueIndex;not null" json:"userId"`
+	UserID      uint      `gorm:"uniqueIndex:idx_user_levels_user_id;not null" json:"userId"`
 	Level       int       `gorm:"default:1" json:"level"`
 	Points      int       `gorm:"default:0" json:"points"`
 	TotalPoints int       `gorm:"default:0" json:"totalPoints"`
@@ -78,7 +87,7 @@ func (PointsRecord) TableName() string {
 
 type PointsRule struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	Type        string    `gorm:"size:20;unique" json:"type"`
+	Type        string    `gorm:"size:20;uniqueIndex:uk_points_rules_type" json:"type"`
 	Points      int       `json:"points"`
 	Description string    `gorm:"size:100" json:"description"`
 	IsActive    int       `gorm:"default:1" json:"isActive"`
@@ -107,14 +116,18 @@ func (LevelBenefit) TableName() string {
 
 type NotificationSettings struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
-	UserID        uint      `gorm:"uniqueIndex;not null" json:"userId"`
+	UserID        uint      `gorm:"uniqueIndex:idx_notification_settings_user_id;not null" json:"userId"`
 	LikeNotify    int       `gorm:"default:1" json:"likeNotify"`
 	CommentNotify int       `gorm:"default:1" json:"commentNotify"`
 	AtNotify      int       `gorm:"default:1" json:"atNotify"`
 	FollowNotify  int       `gorm:"default:1" json:"followNotify"`
 	SystemNotify  int       `gorm:"default:1" json:"systemNotify"`
-	CreatedAt     time.Time `gorm:"autoCreateTime" json:"createdAt"`
-	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
+	// MessageNotify 私信提醒开关（N8-07）：关闭后不做实时推送；消息仍入库并计未读
+	MessageNotify int       `gorm:"default:1" json:"messageNotify"`
+	// SecurityNotify 安全提醒（R4）：关闭后不发新设备登录通知
+	SecurityNotify int       `gorm:"default:1" json:"securityNotify"`
+	CreatedAt      time.Time `gorm:"autoCreateTime" json:"createdAt"`
+	UpdatedAt      time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
 }
 
 func (NotificationSettings) TableName() string {

@@ -112,6 +112,22 @@ func TestStatsServiceCalculateStats(t *testing.T) {
 			t.Errorf("expected post count 1, got %d", stats.PostCount)
 		}
 	})
+
+	t.Run("idempotent upsert same day", func(t *testing.T) {
+		if err := srv.CalculateStats(); err != nil {
+			t.Fatalf("first calculate: %v", err)
+		}
+		if err := srv.CalculateStats(); err != nil {
+			t.Fatalf("second calculate should update not 1062: %v", err)
+		}
+		var count int64
+		if err := db.Model(&model.Statistics{}).Count(&count).Error; err != nil {
+			t.Fatalf("count daily_stats: %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("expected 1 daily_stats row for today, got %d", count)
+		}
+	})
 }
 
 func TestStatsServiceGetTrendData(t *testing.T) {
@@ -143,12 +159,10 @@ func TestStatsServiceGetTrendData(t *testing.T) {
 	})
 
 	t.Run("unknown type", func(t *testing.T) {
+		// 未知类型必须报错，而不是返回空序列让调用方以为「这段时间没数据」
 		data, err := srv.GetTrendData("unknown", 7)
-		if err != nil {
-			t.Fatalf("get trend data failed: %v", err)
-		}
-		if len(data.Data) != 0 {
-			t.Errorf("expected 0 data points, got %d", len(data.Data))
+		if err == nil {
+			t.Fatalf("未知统计类型应返回错误，实际拿到 %+v", data)
 		}
 	})
 }

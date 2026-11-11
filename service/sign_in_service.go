@@ -57,10 +57,10 @@ func (s *SignInService) GenerateQRCode(activityID uint) (*types.QRCodeResponse, 
 
 	qrCode, expires := s.qrcodeService.GenerateQRCode(activityID)
 
+	// 二维码内容由前端组件（qrcode.react）渲染，服务端只返回内容与过期时间
 	return &types.QRCodeResponse{
-		QRCode:   qrCode,
-		ImageURL: s.qrcodeService.GenerateQRCodeImageBase64(qrCode),
-		Expires:  expires,
+		QRCode:  qrCode,
+		Expires: expires,
 	}, nil
 }
 
@@ -98,11 +98,14 @@ func (s *SignInService) SignIn(userID uint, req *types.SignInRequest) (*types.Si
 		return nil, errors.New("已经签到")
 	}
 
-	// 检查是否已报名（可选，根据活动要求）
-	// isRegistered, _ := s.registrationRepo.Exists(activityID, userID)
-	// if !isRegistered {
-	//     return nil, errors.New("请先报名活动")
-	// }
+	// 线下活动需先报名才能签到；报名记录查询失败必须报错，不能当作未报名
+	isRegistered, err := s.registrationRepo.Exists(activityID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isRegistered {
+		return nil, errors.New("请先报名活动")
+	}
 
 	signIn := &model.SignIn{
 		ActivityID:     activityID,

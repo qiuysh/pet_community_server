@@ -4,22 +4,62 @@ server:
   host: "0.0.0.0"
   port: 8083
   timeout: 30
+  # 运行环境：development（允许验证码回传响应，便于联调）/ production
+  env: "development"
+
+# 首次启动且库中无后台账号时创建的超管；initial_password 留空则随机生成并打印一次
+# 生产环境务必覆盖为强口令（或留空走随机生成）
+admin:
+  initial_username: "admin"
+  initial_password: "admin123"
+
+# 第三方登录（微信 / 微博 / QQ）
+# 安全约定：openID 只能由服务端拿 code 调平台 OAuth 接口换取；
+# 未配置凭据的平台会直接拒绝登录，绝不会用 code 本地拼装身份。
+third_party:
+  # 演示模式：不调用真实 OAuth，直接用 code 派生稳定 openID。
+  # 仅 server.env=development 时生效，其它环境会被强制忽略（等同未配置）。
+  demo_mode: true
+  wechat:
+    app_id: ""
+    app_secret: ""
+    # 微信网页授权回调地址，需与开放平台配置一致
+    redirect_uri: ""
+    # 可选覆盖（自建代理/测试用），留空用官方地址
+    token_url: ""
+    user_info_url: ""
+  weibo:
+    app_id: ""
+    app_secret: ""
+    redirect_uri: ""
+    token_url: ""
+    user_info_url: ""
+  qq:
+    app_id: ""
+    app_secret: ""
+    redirect_uri: ""
+    token_url: ""
+    user_info_url: ""
 
 database:
   host: localhost
   port: 3306
   username: root
-  password: xxxx
+  password: 123456
   database: pet_community
 
 jwt:
   secret: sdiak0i5u2y34yr845093u3u1237r545454503i4023i4
 
+# 活动签到二维码 HMAC 密钥（生产务必单独配置并轮换；留空则启动随机生成并告警）
+qrcode:
+  secret: "pet-community-qrcode-dev-secret-change-me"
+
 redis:
   enabled: true
   host: 127.0.0.1
   port: 6379
-  password: xxxx
+  password: 558321
   db: 0
   pool_size: 10
 
@@ -36,3 +76,28 @@ scheduler:
   notification_cron: "0 * * * * *"
   scheduled_post_cron: "0 */5 * * * *"
   stats_startup_delay_sec: 5
+
+# 文件存储：业务层统一走存储抽象，切换 OSS 只改这里
+storage:
+  # driver: local（本地磁盘）| oss / s3（S3 兼容对象存储）
+  driver: local
+  local:
+    # 落盘根目录（相对进程工作目录，也可填绝对路径）
+    root: public/uploads
+    # 对外访问前缀，需与静态路由挂载路径一致；末段必须是 uploads（禁止 /api、/api/v1，以免 CSRF 豁免面过大）
+    base_url: /api/v1/uploads
+  oss:
+    # 端点不带协议：阿里云 OSS 如 oss-cn-hangzhou.aliyuncs.com，MinIO 如 127.0.0.1:9000
+    endpoint: ""
+    region: cn-hangzhou
+    bucket: ""
+    access_key_id: ""
+    access_key_secret: ""
+    # object key 统一前缀
+    key_prefix: uploads
+    # 对外访问域名（CDN / 自定义域名），留空按 endpoint + bucket 自动拼接。
+    # 返回的是公开 URL：桶需配置公共读或由 CDN 回源授权，否则前端会 403。
+    base_url: ""
+    use_ssl: true
+    # true=路径风格 https://endpoint/bucket/key（MinIO）；false=虚拟主机风格（阿里云 OSS / COS / S3）
+    path_style: false

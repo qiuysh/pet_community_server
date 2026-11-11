@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"pet-community/model"
 	"time"
 
@@ -81,15 +82,29 @@ func (r *AdminRepository) UpdateSystemConfig(key, value string) error {
 	return r.db.Model(&model.SystemConfig{}).Where("config_key = ?", key).Update("config_value", value).Error
 }
 
+// BatchUpdateSystemConfig 批量写入系统配置。
+// key 已存在则更新值，不存在则插入（seed 缺失时不再静默丢失保存结果）。
 func (r *AdminRepository) BatchUpdateSystemConfig(configs map[string]string) error {
-	tx := r.db.Begin()
-	for key, value := range configs {
-		if err := tx.Model(&model.SystemConfig{}).Where("config_key = ?", key).Update("config_value", value).Error; err != nil {
-			tx.Rollback()
-			return err
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for key, value := range configs {
+			var cfg model.SystemConfig
+			err := tx.Where("config_key = ?", key).First(&cfg).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				if err := tx.Create(&model.SystemConfig{ConfigKey: key, ConfigValue: value}).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if err := tx.Model(&model.SystemConfig{}).Where("config_key = ?", key).
+				Update("config_value", value).Error; err != nil {
+				return err
+			}
 		}
-	}
-	return tx.Commit().Error
+		return nil
+	})
 }
 
 func (r *AdminRepository) SearchSensitiveWords(keyword string, page, limit int) ([]model.SensitiveWord, int64, error) {

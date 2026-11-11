@@ -3,6 +3,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 
 	"pet-community/cache"
@@ -43,8 +44,9 @@ func (s *AdminFrontUserService) BanFrontUser(userID uint, reason string, adminID
 	if err := s.userRepo.Update(user); err != nil {
 		return err
 	}
-	_ = s.userRepo.RemoveAllDevices(userID)
-	_ = s.userRepo.IncrementTokenVersion(userID)
+	if err := s.invalidateSessions(userID); err != nil {
+		return fmt.Errorf("用户已封禁，但强制下线失败: %w", err)
+	}
 	cache.InvalidateUserSession(userID)
 
 	log := &model.AdminOperationLog{
@@ -89,18 +91,28 @@ func (s *AdminFrontUserService) BatchBanFrontUsers(userIDs []uint, reason string
 		return errors.New("请选择要封禁的用户")
 	}
 
+	var firstErr error
+	banned := 0
 	for _, userID := range userIDs {
 		user, err := s.userRepo.GetByID(userID)
 		if err != nil {
 			continue
 		}
-		if user.Status != 2 {
-			user.Status = 2
-			s.userRepo.Update(user)
-			_ = s.userRepo.RemoveAllDevices(userID)
-			_ = s.userRepo.IncrementTokenVersion(userID)
-			cache.InvalidateUserSession(userID)
+		if user.Status == 2 {
+			continue
 		}
+		user.Status = 2
+		if err := s.userRepo.Update(user); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("用户 %d 封禁失败: %w", userID, err)
+			}
+			continue
+		}
+		banned++
+		if err := s.invalidateSessions(userID); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("用户 %d 已封禁但强制下线失败: %w", userID, err)
+		}
+		cache.InvalidateUserSession(userID)
 	}
 
 	log := &model.AdminOperationLog{
@@ -108,8 +120,20 @@ func (s *AdminFrontUserService) BatchBanFrontUsers(userIDs []uint, reason string
 		Action:     "batch_ban_front_users",
 		TargetType: "user",
 		TargetID:   userIDs[0],
-		Detail:     "批量封禁用户, 数量: " + strconv.Itoa(len(userIDs)) + ", 原因: " + reason,
+		Detail:     "批量封禁用户, 成功: " + strconv.Itoa(banned) + ", 请求: " + strconv.Itoa(len(userIDs)) + ", 原因: " + reason,
 		IP:         ip,
 	}
-	return s.adminRepo.CreateOperationLog(log)
+	if err := s.adminRepo.CreateOperationLog(log); err != nil {
+		return err
+	}
+	return firstErr
+}
+
+// invalidateSessions 使目标用户所有登录态失效：清设备 + 递增 Token 版本。
+// 两步都不能静默失败，否则旧 Token 在缓存/设备失效前仍可能通过校验。
+func (s *AdminFrontUserService) invalidateSessions(userID uint) error {
+	if err := s.userRepo.RemoveAllDevices(userID); err != nil {
+		return err
+	}
+	return s.userRepo.IncrementTokenVersion(userID)
 }

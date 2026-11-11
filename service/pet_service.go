@@ -1,30 +1,58 @@
 package service
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
-	"os"
-	"path/filepath"
+	"strings"
+
 	"pet-community/model"
 	"pet-community/repository"
 	"pet-community/types"
 	"pet-community/utils"
-	"strings"
-	"time"
 )
 
 type PetService struct {
-	petRepo *repository.PetRepository
+	petRepo    *repository.PetRepository
+	followRepo *repository.FollowRepository
 }
 
 func NewPetService(petRepo *repository.PetRepository) *PetService {
 	return &PetService{petRepo: petRepo}
 }
 
+// SetFollowRepository R5：粉丝可见性依赖普通关注关系
+func (s *PetService) SetFollowRepository(followRepo *repository.FollowRepository) {
+	s.followRepo = followRepo
+}
+
+func (s *PetService) isPublicFollower(viewerID, ownerID uint) bool {
+	if s.followRepo == nil || viewerID == 0 || ownerID == 0 {
+		return false
+	}
+	ok, err := s.followRepo.ExistsPublic(viewerID, ownerID)
+	return err == nil && ok
+}
+
+func (s *PetService) canViewPet(viewerID uint, pet *model.Pet) bool {
+	return CanViewPost(viewerID, pet.UserID, pet.Visibility, s.isPublicFollower(viewerID, pet.UserID))
+}
+
+func (s *PetService) publicFollowingIDs(viewerID uint) []uint {
+	if s.followRepo == nil || viewerID == 0 {
+		return nil
+	}
+	ids, err := s.followRepo.GetPublicFollowingIDs(viewerID)
+	if err != nil {
+		return nil
+	}
+	return ids
+}
+
 func (s *PetService) CreatePet(userID uint, req *types.PetCreateRequest) (*types.PetInfo, error) {
+	visibility := VisibilityPublic
+	if req.Visibility != nil {
+		visibility = *req.Visibility
+	}
 	pet := &model.Pet{
 		UserID:       userID,
 		Name:         FilterSensitiveText(req.Name),
@@ -40,6 +68,7 @@ func (s *PetService) CreatePet(userID uint, req *types.PetCreateRequest) (*types
 		IsSterilized: req.IsSterilized,
 		IsVaccinated: req.IsVaccinated,
 		Status:       1,
+		Visibility:   visibility,
 	}
 
 	if req.BreedID > 0 && req.BreedName == "" {
@@ -112,6 +141,9 @@ func (s *PetService) UpdatePet(userID uint, petID uint, req *types.PetUpdateRequ
 	if req.Status >= 0 {
 		pet.Status = req.Status
 	}
+	if req.Visibility != nil {
+		pet.Visibility = *req.Visibility
+	}
 
 	if err := s.petRepo.Update(pet); err != nil {
 		return nil, err
@@ -120,15 +152,31 @@ func (s *PetService) UpdatePet(userID uint, petID uint, req *types.PetUpdateRequ
 	return convertToPetInfo(pet), nil
 }
 
-func (s *PetService) GetPetByID(id uint) (*types.PetInfo, error) {
+func (s *PetService) GetPetByID(id, viewerID uint) (*types.PetInfo, error) {
 	pet, err := s.petRepo.GetByID(id)
 	if err != nil {
+		return nil, errors.New("宠物不存在")
+	}
+	// 越权不泄露存在性：统一「宠物不存在」
+	if !s.canViewPet(viewerID, pet) {
 		return nil, errors.New("宠物不存在")
 	}
 
 	go s.petRepo.IncrementViewCount(id)
 
 	return convertToPetInfo(pet), nil
+}
+
+// EnsurePetAccessible 相册/成长等子资源读取前校验可见性（不可见 → 同「不存在」）
+func (s *PetService) EnsurePetAccessible(petID, viewerID uint) error {
+	pet, err := s.petRepo.GetByID(petID)
+	if err != nil {
+		return errors.New("宠物不存在")
+	}
+	if !s.canViewPet(viewerID, pet) {
+		return errors.New("宠物不存在")
+	}
+	return nil
 }
 
 func (s *PetService) DeletePet(userID uint, petID uint) error {
@@ -157,7 +205,7 @@ func (s *PetService) GetUserPets(userID uint) ([]types.PetInfo, error) {
 	return result, nil
 }
 
-func (s *PetService) ListPets(req *types.PetListRequest) (*types.PetListResponse, error) {
+func (s *PetService) ListPets(req *types.PetListRequest, viewerID uint) (*types.PetListResponse, error) {
 	page := req.Page
 	if page <= 0 {
 		page = 1
@@ -167,7 +215,7 @@ func (s *PetService) ListPets(req *types.PetListRequest) (*types.PetListResponse
 		pageSize = 20
 	}
 
-	pets, total, err := s.petRepo.List(req.UserID, req.PetType, req.Keyword, page, pageSize)
+	pets, total, err := s.petRepo.List(req.UserID, req.PetType, req.Keyword, page, pageSize, viewerID, s.publicFollowingIDs(viewerID))
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +254,7 @@ func (s *PetService) GetBreeds(petType int) ([]types.PetBreedInfo, error) {
 }
 
 // UploadAvatar 上传宠物头像（≤2MB），返回可访问 URL
+// 落盘位置由存储驱动决定（本地磁盘 / 对象存储）
 func (s *PetService) UploadAvatar(file io.Reader, originalExt string) (string, error) {
 	ext := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(originalExt, ".")))
 	switch ext {
@@ -214,39 +263,15 @@ func (s *PetService) UploadAvatar(file io.Reader, originalExt string) (string, e
 		return "", errors.New("仅支持 jpg/jpeg/png/webp 格式的头像")
 	}
 
-	uploadDir := filepath.Join("public", "uploads", "pet-avatar")
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建上传目录失败: %w", err)
-	}
-
-	randBytes := make([]byte, 16)
-	if _, err := rand.Read(randBytes); err != nil {
-		return "", fmt.Errorf("生成随机文件名失败: %w", err)
-	}
-	fileName := fmt.Sprintf("%d_%s.%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes), ext)
-	fullPath := filepath.Join(uploadDir, fileName)
-
-	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("保存文件失败: %w", err)
-	}
-	defer f.Close()
-
-	maxSize := utils.MaxAvatarBytes
-	written, err := io.Copy(f, io.LimitReader(file, maxSize+1))
-	if err != nil {
-		_ = os.Remove(fullPath)
-		return "", fmt.Errorf("保存图片数据失败: %w", err)
-	}
-	if written > maxSize {
-		_ = os.Remove(fullPath)
-		return "", errors.New("头像大小不得超过 2MB")
-	}
-
-	return "/uploads/pet-avatar/" + fileName, nil
+	return utils.CurrentStorage().Save(file, utils.SaveOptions{
+		Category: utils.CategoryPetAvatar,
+		Ext:      ext,
+		MaxSize:  utils.MaxAvatarBytes,
+		Kind:     "头像",
+	})
 }
 
-// UploadAlbumPhoto 上传宠物相册图片（本地保存，返回可访问 URL）
+// UploadAlbumPhoto 上传宠物相册图片（≤5MB），返回可访问 URL
 func (s *PetService) UploadAlbumPhoto(file io.Reader, originalExt string) (string, error) {
 	ext := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(originalExt, ".")))
 	switch ext {
@@ -255,36 +280,12 @@ func (s *PetService) UploadAlbumPhoto(file io.Reader, originalExt string) (strin
 		return "", errors.New("仅支持 jpg/jpeg/png/gif/webp/bmp 格式的图片")
 	}
 
-	uploadDir := filepath.Join("public", "uploads", "pet-album")
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建上传目录失败: %w", err)
-	}
-
-	randBytes := make([]byte, 16)
-	if _, err := rand.Read(randBytes); err != nil {
-		return "", fmt.Errorf("生成随机文件名失败: %w", err)
-	}
-	fileName := fmt.Sprintf("%d_%s.%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes), ext)
-	fullPath := filepath.Join(uploadDir, fileName)
-
-	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("保存文件失败: %w", err)
-	}
-	defer f.Close()
-
-	maxSize := utils.MaxPostImageBytes
-	written, err := io.Copy(f, io.LimitReader(file, maxSize+1))
-	if err != nil {
-		_ = os.Remove(fullPath)
-		return "", fmt.Errorf("保存图片数据失败: %w", err)
-	}
-	if written > maxSize {
-		_ = os.Remove(fullPath)
-		return "", errors.New("图片大小不得超过 5MB")
-	}
-
-	return "/uploads/pet-album/" + fileName, nil
+	return utils.CurrentStorage().Save(file, utils.SaveOptions{
+		Category: utils.CategoryPetAlbum,
+		Ext:      ext,
+		MaxSize:  utils.MaxPostImageBytes,
+		Kind:     "图片",
+	})
 }
 
 // UploadAlbumVideo 上传宠物相册视频（MP4，≤50MB）
@@ -294,36 +295,12 @@ func (s *PetService) UploadAlbumVideo(file io.Reader, originalExt string) (strin
 		return "", errors.New("相册视频仅支持 MP4 格式")
 	}
 
-	uploadDir := filepath.Join("public", "uploads", "pet-album")
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建上传目录失败: %w", err)
-	}
-
-	randBytes := make([]byte, 16)
-	if _, err := rand.Read(randBytes); err != nil {
-		return "", fmt.Errorf("生成随机文件名失败: %w", err)
-	}
-	fileName := fmt.Sprintf("%d_%s.%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes), ext)
-	fullPath := filepath.Join(uploadDir, fileName)
-
-	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("保存文件失败: %w", err)
-	}
-	defer f.Close()
-
-	maxSize := utils.MaxVideoBytes
-	written, err := io.Copy(f, io.LimitReader(file, maxSize+1))
-	if err != nil {
-		_ = os.Remove(fullPath)
-		return "", fmt.Errorf("保存视频数据失败: %w", err)
-	}
-	if written > maxSize {
-		_ = os.Remove(fullPath)
-		return "", errors.New("视频大小不得超过 50MB")
-	}
-
-	return "/uploads/pet-album/" + fileName, nil
+	return utils.CurrentStorage().Save(file, utils.SaveOptions{
+		Category: utils.CategoryPetAlbum,
+		Ext:      ext,
+		MaxSize:  utils.MaxVideoBytes,
+		Kind:     "视频",
+	})
 }
 
 func (s *PetService) AddAlbumPhoto(userID, petID uint, req *types.PetAlbumCreateRequest) (*types.PetAlbumInfo, error) {
@@ -362,7 +339,10 @@ func (s *PetService) AddAlbumPhoto(userID, petID uint, req *types.PetAlbumCreate
 	return toAlbumInfo(photo), nil
 }
 
-func (s *PetService) GetPetAlbum(petID uint) ([]types.PetAlbumInfo, error) {
+func (s *PetService) GetPetAlbum(petID, viewerID uint) ([]types.PetAlbumInfo, error) {
+	if err := s.EnsurePetAccessible(petID, viewerID); err != nil {
+		return nil, err
+	}
 	photos, err := s.petRepo.GetPetAlbum(petID)
 	if err != nil {
 		return nil, err
@@ -536,7 +516,10 @@ func (s *PetService) DeleteGrowthRecord(userID, petID, recordID uint) error {
 	return s.petRepo.DeleteGrowthRecord(recordID, petID)
 }
 
-func (s *PetService) GetGrowthRecords(petID uint, page, pageSize int) ([]types.PetGrowthRecordInfo, int64, error) {
+func (s *PetService) GetGrowthRecords(petID, viewerID uint, page, pageSize int) ([]types.PetGrowthRecordInfo, int64, error) {
+	if err := s.EnsurePetAccessible(petID, viewerID); err != nil {
+		return nil, 0, err
+	}
 	if page <= 0 {
 		page = 1
 	}
@@ -565,36 +548,12 @@ func (s *PetService) UploadLostPetPhoto(file io.Reader, originalExt string) (str
 		return "", errors.New("仅支持 jpg/jpeg/png/gif/webp/bmp 格式的图片")
 	}
 
-	uploadDir := filepath.Join("public", "uploads", "lost-pet")
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建上传目录失败: %w", err)
-	}
-
-	randBytes := make([]byte, 16)
-	if _, err := rand.Read(randBytes); err != nil {
-		return "", fmt.Errorf("生成随机文件名失败: %w", err)
-	}
-	fileName := fmt.Sprintf("%d_%s.%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes), ext)
-	fullPath := filepath.Join(uploadDir, fileName)
-
-	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("保存文件失败: %w", err)
-	}
-	defer f.Close()
-
-	maxSize := utils.MaxPostImageBytes
-	written, err := io.Copy(f, io.LimitReader(file, maxSize+1))
-	if err != nil {
-		_ = os.Remove(fullPath)
-		return "", fmt.Errorf("保存图片数据失败: %w", err)
-	}
-	if written > maxSize {
-		_ = os.Remove(fullPath)
-		return "", errors.New("图片大小不得超过 5MB")
-	}
-
-	return "/uploads/lost-pet/" + fileName, nil
+	return utils.CurrentStorage().Save(file, utils.SaveOptions{
+		Category: utils.CategoryLostPet,
+		Ext:      ext,
+		MaxSize:  utils.MaxPostImageBytes,
+		Kind:     "图片",
+	})
 }
 
 func (s *PetService) CreateLostPet(userID uint, req *types.LostPetCreateRequest) (*types.LostPetInfo, error) {
@@ -666,6 +625,21 @@ func (s *PetService) ListLostPets(req *types.LostPetListRequest, viewerID uint) 
 	}, nil
 }
 
+// RecordLostPetShare 寻宠分享上报（R2）：platform 非空时累加 shares_count；允许游客。
+func (s *PetService) RecordLostPetShare(id uint, platform string) (*types.LostPetShareResponse, error) {
+	lostPet, err := s.petRepo.GetLostPetByID(id)
+	if err != nil {
+		return nil, errors.New("寻宠启事不存在")
+	}
+	if strings.TrimSpace(platform) != "" {
+		if err := s.petRepo.IncrementLostPetSharesCount(id, 1); err != nil {
+			return nil, err
+		}
+		lostPet.SharesCount++
+	}
+	return &types.LostPetShareResponse{SharesCount: lostPet.SharesCount}, nil
+}
+
 func (s *PetService) UpdateLostPetStatus(userID, id uint, status int) error {
 	lostPet, err := s.petRepo.GetLostPetByID(id)
 	if err != nil {
@@ -680,6 +654,7 @@ func (s *PetService) UpdateLostPetStatus(userID, id uint, status int) error {
 }
 
 func convertToPetInfo(pet *model.Pet) *types.PetInfo {
+	accessible := true
 	return &types.PetInfo{
 		ID:           pet.ID,
 		UserID:       pet.UserID,
@@ -696,8 +671,20 @@ func convertToPetInfo(pet *model.Pet) *types.PetInfo {
 		IsSterilized: pet.IsSterilized,
 		IsVaccinated: pet.IsVaccinated,
 		Status:       pet.Status,
+		Visibility:   pet.Visibility,
+		Accessible:   &accessible,
 		ViewCount:    pet.ViewCount,
 		CreatedAt:    pet.CreatedAt.Format("2006-01-02 15:04:05"),
+	}
+}
+
+// HiddenPetInfo 帖子关联宠物对查看者不可见时的降级卡片
+func HiddenPetInfo(petID uint) types.PetInfo {
+	accessible := false
+	return types.PetInfo{
+		ID:         petID,
+		Name:       "宠物信息不可见",
+		Accessible: &accessible,
 	}
 }
 
@@ -746,6 +733,7 @@ func convertToLostPetInfo(lostPet *model.LostPet, viewerID uint) *types.LostPetI
 		Contact:      contact,
 		Status:       lostPet.Status,
 		ViewCount:    lostPet.ViewCount,
+		SharesCount:  lostPet.SharesCount,
 		CreatedAt:    lostPet.CreatedAt.Format("2006-01-02 15:04:05"),
 	}
 }
